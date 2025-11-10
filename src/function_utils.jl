@@ -1,3 +1,5 @@
+using LinearAlgebra
+
 """
 Parameters for Lennard-Jones potential
 """
@@ -27,14 +29,23 @@ end
 
 """
 Compute pairwise distances from a matrix R^{d x N} in which each column encodes the position of a particle 
+Tried to make it efficient
 """
 function pairwise_dist(q::AbstractMatrix{R}) where {R<:Real}
     d, N = size(q)
-    D = Vector{R}(undef, Int(N*(N-1)/2))
+    T = typeof(norm(@view q[:,1]))
+    D = Vector{T}(undef, Int(N*(N-1)/2))
     idx = 1
-    for i in 1:N
+    @inbounds for i in 1:N
+        qi = @view q[:,i]
         for j in i+1:N
-            D[idx] = norm(q[:,i] - q[:,j])
+            qj = @view q[:,j]
+            s = zero(T)
+            @simd for k in 1:d
+                aux = qi[k] - qj[k]
+                s += aux * aux
+            end
+            D[idx] = sqrt(s)
             idx += 1
         end
     end
