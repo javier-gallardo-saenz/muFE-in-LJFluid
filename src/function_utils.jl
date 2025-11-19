@@ -1,5 +1,6 @@
 using LinearAlgebra
 using Distances
+using StaticArrays
 
 """
 Parameters for Lennard-Jones potential
@@ -15,12 +16,21 @@ Lennard-Jones potential evaluation
 """
 function LJ_pot(r::R, params::LJ_params) where {R<:Real}
     aux = r/params.σ
-    return 4*params.ϵ*((aux)^12 - (aux)^6)
+    return 4*params.ϵ*((aux)^(-12) - (aux)^(-6))
 end
 
 
 """
-Softened interaction potential
+Lennard-Jones potential derivative evaluation
+"""
+function LJ_pot_der(r::R, params::LJ_params) where {R<:Real}
+    aux = (params.σ/r)^6
+    return 24*params.ϵ*(-2*aux^(2) + aux)/r
+end
+
+
+"""
+Softened interaction potential evaluation
 """
 function soft_pot(r::R, params::LJ_params, λ::R) where {R<:Real}
     A = 0.5*(1-λ) + (r/params.σ)^6
@@ -29,8 +39,28 @@ end
 
 
 """
+Softened interaction potential derivative wrt r evaluation
+"""
+function soft_pot_dr(r::R, params::LJ_params, λ::R) where {R<:Real}
+    aux = (r/params.σ)^6
+    A = 0.5*(1-λ) + aux
+    return 24*params.ϵ*aux*(-2*A^(-3) + A^(-2))/r
+end
+
+
+"""
+Softened interaction potential derivative wrt λ evaluation
+"""
+function soft_pot_dr(r::R, params::LJ_params, λ::R) where {R<:Real}
+    aux = (r/params.σ)^6
+    A = 0.5*(1-λ) + aux
+    return 2*params.ϵ*(2*A^(-3) - A^(-2))
+end
+
+
+"""
 Compute pairwise distances from a matrix R^{d x N} in which each column encodes the position of a particle 
-Very memory efficient, but Distance.jl is better performance-wise
+Very memory efficient, but Distance.jl is better performance-wise if only distances are needed
 """
 function pairwise_dist(q::AbstractMatrix{R}) where {R<:Real}
     d, N = size(q)
@@ -76,7 +106,32 @@ end
 
 
 """
-Particle instertion Hamiltonian, vectorized for efficiency
+Compute distances and distance vectors in a same pass
+"""
+function pairwise_dist_vec(q::AbstractMatrix{R}) where {R<:Real}
+    d, N = size(q)
+    T = typeof(norm(@view q[:,1]))
+    num_pairs = Int(N*(N-1)/2)
+
+    D = Vector{T}(undef, num_pairs)
+    Δr = Vector{SVector{d,T}}(undef, num_pairs)
+
+    idx = 1
+    @inbounds for i in 1:N-1
+        qi = @view q[:,]
+        for j in i+1:N
+            qj = @view q[:,j]
+            Δr[idx] = qi .- qj
+            D[idx] = sqrt(s)
+            idx += 1
+        end
+    end
+    return D 
+end
+
+
+"""
+Particle instertion Hamiltonian. Versatile formulation that can be integrated with ForwardDiff, but not the most efficient. 
 Inserted particle is fixed at the origin during the process
 If stor_over_perf = true then pairwise distances are computed using the storage-optimized pairwise_dist
 Otherwise pairwise distances are computed using Distances.jl for optimized performance
@@ -97,10 +152,185 @@ end
 
 
 """
-Softened particle insertion Hamiltonian, vectorized for efficiency
-Inserted particle is fixed at the origin during the process
-If stor_over_perf = true then pairwise distances are computed using the storage-optimized pairwise_dist
-Otherwise pairwise distances are computed using Distances.jl for optimized performance
+q-gradient of the particle insertion Hamiltonian.
+Assumes q is given as Vector{SVector{d, R}} with length(q) = N
+Periodic boundary conditions with the standard cutoff L/2 are imposed.
+"""
+function dH_pi_dq(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R}) where {R<:Real}
+    d, N = length(q[1]), length(q)
+    @assert d == length(L) "The boxes dimensions must match the dimension of q"
+    T = typeof(norm(@view q[:,1]))
+
+    dHdq = [@MVector zeros(T, d) for _ in 1:N]
+    dq = MVector{d, T}(undef)
+
+    @inbounds for i in 1:N-1
+        #compute derivative of interaction potential wrt the inserted particle, fixed at the origin
+        r0 = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        dHdq[i] .+= λ*LJ_pot_der(r0, params)*q[i]/r0
+
+        for j in i+1:N
+            #compute radius and distance vector between particles i and j
+            dq .= q[i] .- q[j]
+            dq .= dq .- L .* round.(dq./ L) #pbc + minimum image convention
+            r  = sqrt(sum(abs2, dq))
+
+            #compute gradient
+            Fij = LJ_pot_der(r, params)*dq/r
+            dHdq[i] .+= Fij
+            dHdq[j] .-= Fij
+        end
+    end
+
+    rN = sqrt(sum(abs2, q[N]))
+    dHdq[N] .+= λ*LJ_pot_der(rN, params)*q[N]/rN
+
+    return dHdq
+    
+end
+
+
+"""
+q-gradient and λ-gradient of the particle insertion Hamiltonian.
+Assumes q is given as Vector{SVector{d, R}} with length(q) = N
+Periodic boundary conditions with the standard cutoff L/2 are imposed.
+"""
+function dH_pi_dq_and_dλ(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R}) where {R<:Real}
+    d, N = length(q[1]), length(q)
+    @assert d == length(L) "The boxes dimensions must match the dimension of q"
+    T = typeof(norm(@view q[:,1]))
+
+    dHdq = [@MVector zeros(T, d) for _ in 1:N]
+    dHdλ = 0
+    dq = MVector{d, T}(undef)
+
+    @inbounds for i in 1:N-1
+        #compute derivative of interaction potential with the inserted particle, fixed at the origin
+        #and derivative of interaction potential wrt λ
+        r0 = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        dHdq[i] .+= λ*LJ_pot_der(r0, params)*q[i]/r0
+        dHdλ += LJ_pot(r0, params)
+
+        for j in i+1:N
+            #compute radius and distance vector between particles i and j
+            dq .= q[i] .- q[j]
+            dq .= dq .- L .* round.(dq./ L) #pbc + minimum image convention
+            r  = sqrt(sum(abs2, dq))
+
+            #compute gradient
+            Fij = LJ_pot_der(r, params)*dq/r
+            dHdq[i] .+= Fij
+            dHdq[j] .-= Fij
+        end
+    end
+
+    rN = sqrt(sum(abs2, q[N]))
+    dHdq[N] .+= λ*LJ_pot_der(rN, params)*q[N]/rN
+    dHdλ += LJ_pot(rN, params)
+
+    return dHdq, dHdλ
+    
+end
+
+
+"""
+q-gradient and U(q) of the particle insertion Hamiltonian, H = T(p) + U(q)
+Assumes q is given as Vector{SVector{d, R}} with length(q) = N
+Periodic boundary conditions with the standard cutoff L/2 are imposed.
+"""
+function V_and_dH_pi_dq(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R}) where {R<:Real}
+    d, N = length(q[1]), length(q)
+    @assert d == length(L) "The boxes dimensions must match the dimension of q"
+    T = typeof(norm(@view q[:,1]))
+
+    dHdq = [@MVector zeros(T, d) for _ in 1:N]
+    U = 0
+    dq = MVector{d, T}(undef)
+
+    @inbounds for i in 1:N-1
+        #compute derivative of interaction potential with the inserted particle, fixed at the origin
+        #and contribution of the λ-term to V
+        r0 = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        dHdq[i] .+= λ*LJ_pot_der(r0, params)*q[i]/r0
+        U += λ*LJ_pot(r0, params)
+
+        for j in i+1:N
+            #compute radius and distance vector between particles i and j
+            dq .= q[i] .- q[j]
+            dq .= dq .- L .* round.(dq./ L) #pbc + minimum image convention
+            r  = sqrt(sum(abs2, dq))
+
+            #compute gradient and contribution to V
+            Fij = LJ_pot_der(r, params)*dq/r
+            dHdq[i] .+= Fij
+            dHdq[j] .-= Fij
+            U += LJ_pot(r, params)
+        end
+    end
+
+    rN = sqrt(sum(abs2, q[N]))
+    dHdq[N] .+= λ*LJ_pot_der(rN, params)*q[N]/rN
+    U += λ*LJ_pot(rN, params)
+    dHdλ += LJ_pot(rN, params)
+
+    return dHdq, U
+    
+end
+
+
+"""
+q-gradient, λ-gradient and U(q) of the particle insertion Hamiltonian, H = T(p) + U(q)
+Assumes q is given as Vector{SVector{d, R}} with length(q) = N
+Periodic boundary conditions with the standard cutoff L/2 are imposed.
+"""
+function U_and_dH_pi_dq_and_dλ(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R}) where {R<:Real}
+    d, N = length(q[1]), length(q)
+    @assert d == length(L) "The boxes dimensions must match the dimension of q"
+    T = typeof(norm(@view q[:,1]))
+
+    dHdq = [@MVector zeros(T, d) for _ in 1:N]
+    dHdλ = 0
+    U = 0
+    dq = MVector{d, T}(undef)
+
+    @inbounds for i in 1:N-1
+        #compute derivative of interaction potential with the inserted particle, fixed at the origin
+        #and contribution of the λ-term to V
+        r0 = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        dHdq[i] .+= λ*LJ_pot_der(r0, params)*q[i]/r0
+        U += λ*LJ_pot(r0, params)
+        dHdλ += LJ_pot(r0, params)
+
+        for j in i+1:N
+            #compute radius and distance vector between particles i and j
+            dq .= q[i] .- q[j]
+            dq .= dq .- L .* round.(dq./ L) #pbc + minimum image convention
+            r  = sqrt(sum(abs2, dq))
+
+            #compute gradient and contribution to V
+            Fij = LJ_pot_der(r, params)*dq/r
+            dHdq[i] .+= Fij
+            dHdq[j] .-= Fij
+            U += LJ_pot(r, params)
+        end
+    end
+
+    rN = sqrt(sum(abs2, q[N]))
+    dHdq[N] .+= λ*LJ_pot_der(rN, params)*q[N]/rN
+    U += λ*LJ_pot(rN, params)
+
+    return dHdq, U
+    
+end
+
+
+
+
+"""
+Softened particle insertion Hamiltonian. Versatile implementation that can be integrated with ForwardDiff, but not the most efficient.
+Inserted particle is fixed at the origin during the process.
+If stor_over_perf = true then pairwise distances are computed using the storage-optimized pairwise_dist.
+Otherwise pairwise distances are computed using Distances.jl for optimized performance.
 Periodic boundary conditions with the standard cutoff L/2 can be imposed using the PeriodicEuclidean(period) metric.
 """
 function H_spi(p::AbstractMatrix{R}, q::AbstractMatrix{R}, m::R, params::LJ_params, λ::R, 
@@ -115,3 +345,6 @@ function H_spi(p::AbstractMatrix{R}, q::AbstractMatrix{R}, m::R, params::LJ_para
     V_inserted = λ*sum(soft_pot.(norm.(eachcol(q)), Ref(params), Ref(λ))) 
     return K + V_orig + V_inserted
 end
+
+
+
