@@ -138,15 +138,16 @@ end
 Compute pairwise distances from a matrix R^{d x N} in which each column encodes the position of a particle,
  given a certain metric (using Distances.jl)
 """
-function pairwise_dist_perf(metric::Metric, q::Vector{SVector{R}}) where {R <: Real}
-    d, N = length(q[1]), length(q)
-    T = eltype(colwise(metric, q[1], q[2:2]))
+function pairwise_dist_perf(metric::Union{Metric, PreMetric}, q::Vector{SVector{d, R}}) where {d, R <: Real}
+    N = length(q)
+    T = eltype(metric(q[1], q[2]))
     D = Vector{T}(undef, Int(N*(N-1)/2)) 
     idx = 1
     @inbounds for i in 1:N-1
-        aux_dists = colwise(metric, q[i], q[i+1:end])
-        D[idx:idx + length(aux_dists) - 1] = aux_dists
-        idx += length(aux_dists)
+        for j in i+1:N
+            D[idx] = metric(q[i], q[j])
+            idx += 1
+        end
     end
 
     return D
@@ -160,20 +161,19 @@ Periodic boundary conditions with the standard cutoff L/2 are imposed.
 Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
 """
-function dHpi_dq(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R},
-    dVdr::Function, dλVdr::Function) where {R<:Real}
+function dHpi_dq(q::Vector{SVector{d,R}}, params::LJ_params, λ::R, L::SVector{d,R},
+    dVdr::Function, dλVdr::Function) where {d, R<:Real}
 
-    d, N = length(q[1]), length(q)
-    @assert d == length(L) "The boxes dimensions must match the dimension of q"
-    T = typeof(norm(@view q[:,1]))
+    N = length(q)
+    T = typeof(sqrt(sum(abs2,q[1])))
 
     dHdq = [@MVector zeros(T, d) for _ in 1:N]
     dq = MVector{d, T}(undef)
 
     @inbounds for i in 1:N-1
         #compute derivative of interaction potential wrt the inserted particle, fixed at the origin
-        r0 = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
-        dHdq[i] .+= dλVdr(r0, params, λ)*q[i]/r0
+        ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
 
         for j in i+1:N
             #compute radius and distance vector between particles i and j
@@ -203,11 +203,11 @@ Periodic boundary conditions with the standard cutoff L/2 are imposed.
 Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
 """
-function dHpi_dq_and_dλ(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R},
-    dVdr::Function, dVdλ::Function, dλVdr::Function, dλVdλ::Function) where {R<:Real}
-    d, N = length(q[1]), length(q)
-    @assert d == length(L) "The boxes dimensions must match the dimension of q"
-    T = typeof(norm(@view q[:,1]))
+function dHpi_dq_and_dλ(q::Vector{SVector{d,R}}, params::LJ_params, λ::R, L::SVector{d,R},
+    dVdr::Function, dVdλ::Function, dλVdr::Function, dλVdλ::Function) where {d,R<:Real}
+
+    N = length(q)
+    T = typeof(sqrt(sum(abs2,q[1])))
 
     dHdq = [@MVector zeros(T, d) for _ in 1:N]
     dHdλ = 0
@@ -249,11 +249,11 @@ Periodic boundary conditions with the standard cutoff L/2 are imposed.
 Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
 """
-function U_and_dHpi_dq(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R},
-    V::Function, dVdr::Function, λV::Function, dλVdr::Function) where {R<:Real}
-    d, N = length(q[1]), length(q)
-    @assert d == length(L) "The boxes dimensions must match the dimension of q"
-    T = typeof(norm(@view q[:,1]))
+function U_and_dHpi_dq(q::Vector{SVector{d,R}}, params::LJ_params, λ::R, L::SVector{d,R},
+    V::Function, dVdr::Function, λV::Function, dλVdr::Function) where {d,R<:Real}
+
+    N = length(q)
+    T = typeof(sqrt(sum(abs2,q[1])))
 
     dHdq = [@MVector zeros(T, d) for _ in 1:N]
     U = 0
@@ -264,7 +264,7 @@ function U_and_dHpi_dq(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVect
         #and contribution of the λ-term to V
         ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
         dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
-        U += λV(r0, params, λ)
+        U += λV(ri, params, λ)
 
         for j in i+1:N
             #compute radius and distance vector between particles i and j
@@ -296,11 +296,10 @@ Periodic boundary conditions with the standard cutoff L/2 are imposed.
 Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
 """
-function U_and_dHpi_dq_and_dλ(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R},
-    V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function) where {R<:Real}
-    d, N = length(q[1]), length(q)
-    @assert d == length(L) "The boxes dimensions must match the dimension of q"
-    T = typeof(norm(@view q[:,1]))
+function U_and_dHpi_dq_and_dλ(q::Vector{SVector{d, R}}, params::LJ_params, λ::R, L::SVector{d, R},
+    V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function) where {d, R<:Real}
+    N = length(q)
+    T = typeof(sqrt(sum(abs2,q[1])))
 
     dHdq = [@MVector zeros(T, d) for _ in 1:N]
     dHdλ = 0
@@ -313,7 +312,7 @@ function U_and_dHpi_dq_and_dλ(q::Vector{SVector{R}}, params::LJ_params, λ::R, 
         ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
         dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
         dHdλ += dλVdλ(ri, params,λ)
-        U += λV(r0, params, λ)
+        U += λV(ri, params, λ)
 
         for j in i+1:N
             #compute radius and distance vector between particles i and j
@@ -339,6 +338,18 @@ function U_and_dHpi_dq_and_dλ(q::Vector{SVector{R}}, params::LJ_params, λ::R, 
 end
 
 
+
+"""
+p-gradient of any Hamiltonian with the structure H = T(p) + U(q)
+"""
+function dHpi_dp!(∇_p_Hpi ::Vector{MVector{d, R}}, p::Vector{SVector{d, R}}, m::R) where {d, R<:Real}
+    @inbounds @simd for i in 1:length{∇_p_Hpi}
+        @. ∇_p_Hpi = p[i]/m        
+    end
+    return ∇_p_Hpi
+end
+
+
 """
 Particle instertion Hamiltonian. Versatile formulation that can be integrated with ForwardDiff, but not the most efficient. 
 Inserted particle is fixed at the origin during the process
@@ -348,12 +359,12 @@ Periodic boundary conditions with the standard cutoff L/2 can be imposed using t
 Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
 """
-function Hpi(p::Vector{SVector{R}}, q::Vector{SVector{R}}, m::R, params::LJ_params, λ::R, V::Function, λV::Function,
-     stor_over_perf::Bool = false, metric::Metric = Euclidean()) where {R<:Real}
+function Hpi(p::Vector{SVector{d,R}}, q::Vector{SVector{d,R}}, m::R, params::LJ_params, λ::R, V::Function, λV::Function,
+     stor_over_perf::Bool = false, metric::Union{Metric,PreMetric} = Euclidean()) where {d, R<:Real}
     if stor_over_perf
         pw_dist = pairwise_dist(q)
     else
-        pw_dist = pairwise_dist_perf(metric, q, dims=2)
+        pw_dist = pairwise_dist_perf(metric, q)
     end
     K = sum(sum(abs2, pi) for pi in p)/(2*m)
     V_orig = sum(V.(pw_dist, Ref(params)))  
@@ -578,7 +589,6 @@ function U_and_dH_pi_dq_and_dλ(q::Vector{SVector{R}}, params::LJ_params, λ::R,
     return dHdq, dHdλ, U
     
 end
-
 
 
 
