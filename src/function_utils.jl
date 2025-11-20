@@ -116,21 +116,17 @@ end
 Compute pairwise distances from a matrix R^{d x N} in which each column encodes the position of a particle 
 Very memory efficient, but Distance.jl is better performance-wise if only distances are needed
 """
-function pairwise_dist(q::AbstractMatrix{R}) where {R<:Real}
-    d, N = size(q)
-    T = typeof(norm(@view q[:,1]))
+function pairwise_dist(q::Vector{SVector{R}}) where {R<:Real}
+    d, N = length(q[1]), length(q)
+    T = typeof(norm(@view q[1]))
     D = Vector{T}(undef, Int(N*(N-1)/2))
+    dq = MVector{d, T}(undef)
+
     idx = 1
     @inbounds for i in 1:N
-        qi = @view q[:,i]
         for j in i+1:N
-            qj = @view q[:,j]
-            s = zero(T)
-            @simd for k in 1:d
-                aux = qi[k] - qj[k]
-                s += aux * aux
-            end
-            D[idx] = sqrt(s)
+            dq .= q[i] .- q[j]
+            D[idx] = sqrt(sum(abs2, dq))
             idx += 1
         end
     end
@@ -142,15 +138,13 @@ end
 Compute pairwise distances from a matrix R^{d x N} in which each column encodes the position of a particle,
  given a certain metric (using Distances.jl)
 """
-function pairwise_dist_perf(metric::Metric, q::AbstractMatrix{R}) where {R <: Real}
-    N = size(q, 2)
-    q1 = @view q[:,1]
-    T = eltype(colwise(metric, q1, @view q[:, 2:2]))
+function pairwise_dist_perf(metric::Metric, q::Vector{SVector{R}}) where {R <: Real}
+    d, N = length(q[1]), length(q)
+    T = eltype(colwise(metric, q[1], q[2:2]))
     D = Vector{T}(undef, Int(N*(N-1)/2)) 
     idx = 1
     @inbounds for i in 1:N-1
-        qi = @view q[:, i]
-        aux_dists = colwise(metric, qi, @view q[:, i+1:end])
+        aux_dists = colwise(metric, q[i], q[i+1:end])
         D[idx:idx + length(aux_dists) - 1] = aux_dists
         idx += length(aux_dists)
     end
@@ -256,7 +250,7 @@ Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
 """
 function U_and_dHpi_dq(q::Vector{SVector{R}}, params::LJ_params, λ::R, L::SVector{R},
-    V::Function, dVdr::Function, λV:Function, dλVdr::Function) where {R<:Real}
+    V::Function, dVdr::Function, λV::Function, dλVdr::Function) where {R<:Real}
     d, N = length(q[1]), length(q)
     @assert d == length(L) "The boxes dimensions must match the dimension of q"
     T = typeof(norm(@view q[:,1]))
@@ -354,18 +348,27 @@ Periodic boundary conditions with the standard cutoff L/2 can be imposed using t
 Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
 """
-function Hpi(p::AbstractMatrix{R}, q::AbstractMatrix{R}, m::R, params::LJ_params, λ::R, V::Function, λV::Function,
+function Hpi(p::Vector{SVector{R}}, q::Vector{SVector{R}}, m::R, params::LJ_params, λ::R, V::Function, λV::Function,
      stor_over_perf::Bool = false, metric::Metric = Euclidean()) where {R<:Real}
     if stor_over_perf
         pw_dist = pairwise_dist(q)
     else
         pw_dist = pairwise_dist_perf(metric, q, dims=2)
     end
-    K = sum((norm.(eachcol(p))).^2)/(2*m)
+    K = sum(sum(abs2, pi) for pi in p)/(2*m)
     V_orig = sum(V.(pw_dist, Ref(params)))  
     V_inserted = sum(λV.(norm.(eachcol(q)), Ref(params), Ref(λ))) 
     return K + V_orig + V_inserted
 end
+
+
+
+
+
+
+
+
+
 
 
 
