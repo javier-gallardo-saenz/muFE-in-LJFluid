@@ -118,15 +118,18 @@ Periodic boundary conditions with the standard cutoff L/2 are imposed.
 Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
 """
-function dHpi_dq(q::Vector{SVector{d,R}}, params::LJ_params, λ::R, L::SVector{d,R},
-    dVdr::Function, dλVdr::Function) where {d, R<:Real}
+function dHpi_dq!(dHdq::Vector{<:MVector{d,<:Real}}, q::Vector{<:MVector{d,<:Real}}, params::LJ_params, λ::Real, L::SVector{d,R},
+    dVdr::Function, dλVdr::Function) where {d::Int, R<:Real}
 
     N = length(q)
-    T = typeof(sqrt(sum(abs2,q[1])))
+    @assert N == length(dHdq) "q and dHdq must have the same number of particles"
 
-    dHdq = [@MVector zeros(T, d) for _ in 1:N]
+    T = eltypeof(dHdq[1])
     dq = MVector{d, T}(undef)
-
+    @inbounds for i in 1:N
+        dHdq[i] .= zero(T)
+    end
+    
     @inbounds for i in 1:N-1
         #compute derivative of interaction potential wrt the inserted particle, fixed at the origin
         ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
@@ -148,8 +151,8 @@ function dHpi_dq(q::Vector{SVector{d,R}}, params::LJ_params, λ::R, L::SVector{d
     rN = sqrt(sum(abs2, q[N]))
     dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
 
-    return dHdq
-    
+    return nothing
+
 end
 
 
@@ -299,10 +302,10 @@ end
 p-gradient of any Hamiltonian with the structure H = T(p) + U(q)
 """
 function dHpi_dp!(∇_p_Hpi ::Vector{MVector{d, R}}, p::Vector{SVector{d, R}}, m::R) where {d, R<:Real}
-    @inbounds @simd for i in 1:length{∇_p_Hpi}
+    @inbounds for i in 1:length{∇_p_Hpi}
         @. ∇_p_Hpi = p[i]/m        
     end
-    return ∇_p_Hpi
+    return nothing
 end
 
 
