@@ -1,15 +1,14 @@
 using Parameters
-using function_utils
 
 """
 Custom struct to save the names of the functions used for a given MD load_simulation
 """
-@with_kw struct H_eval_fun_names
-    V::String = ""
-    dVdr::String = ""
-    λV::String = ""
-    dλVdr::String = ""
-    dλVdλ::String = ""
+mutable struct H_eval_fun_names
+    V::String 
+    dVdr::String 
+    λV::String 
+    dλVdr::String 
+    dλVdλ::String 
 end
 
 
@@ -17,7 +16,7 @@ end
 Save current state of a simulation, together with all necessary info to continue running it in the future
 """
 function save_simulation_state(filename::String, p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, L::SVector{d,R},
-    functions::H_eval_fun_names, γ::Real, kbT::Real, δt::Real, step::Int, expectancies::Union{nothing, Float64}=nothing) where {d, R<:Real}
+    functions::H_eval_fun_names, γ::Real, kbT::Real, δt::Real, step::Int, expectancies::Union{Nothing, Float64}=nothing) where {d, R<:Real}
 
     open(filename, "w") do io 
         println(io, "[STEP]")

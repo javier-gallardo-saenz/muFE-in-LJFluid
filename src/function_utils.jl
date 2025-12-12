@@ -2,14 +2,6 @@ using LinearAlgebra
 using Distances
 using StaticArrays
 
-"""
-Parameters for Lennard-Jones potential
-"""
-struct LJ_params
-    σ::Float64
-    ϵ::Float64
-end
-
 
 """
 Lennard-Jones potential evaluation
@@ -124,7 +116,7 @@ function dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{<:MVector{d,Float6
     N = length(q)
     @assert N == length(dHdq) "q and dHdq must have the same number of particles"
 
-    T = eltypeof(dHdq[1])
+    T = eltype(dHdq[1])
     dq = MVector{d, T}(undef)
     @inbounds for i in 1:N
         dHdq[i] .= zero(T)
@@ -133,7 +125,9 @@ function dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{<:MVector{d,Float6
     @inbounds for i in 1:N-1
         #compute derivative of interaction potential wrt the inserted particle, fixed at the origin
         ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
-        dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
+        if ri > 1e-12 || λ > 0.0
+            dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
+        end
 
         for j in i+1:N
             #compute radius and distance vector between particles i and j
@@ -149,7 +143,9 @@ function dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{<:MVector{d,Float6
     end
 
     rN = sqrt(sum(abs2, q[N]))
-    dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
+    if rN > 1e-12 || λ > 0.0
+        dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
+    end
 
     return nothing
 
@@ -167,10 +163,8 @@ function dHpi_dq_and_dλ!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d,
 
     N = length(q)
     @assert N == length(dHdq) "q and dHdq must have the same number of particles"
-    N = length(q)
-    T = typeof(sqrt(sum(abs2,q[1])))
 
-    T = eltypeof(dHdq[1])
+    T = eltype(dHdq[1])
     dq = MVector{d, T}(undef)
     @inbounds for i in 1:N
         dHdq[i] .= zero(T)
@@ -181,8 +175,11 @@ function dHpi_dq_and_dλ!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d,
         #compute derivative of interaction potential with the inserted particle, fixed at the origin
         #and contribution of the λ-term to V
         ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
-        dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
-        dHdλ += dλVdλ(ri, params,λ)
+        if ri > 1e-12 || λ > 0.0
+            #d/dqi(||q0 - qi||) = - (q0 - qi)/||q0 - qi|| = qi/||q0 - qi||
+            dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
+        end
+        dHdλ += dλVdλ(ri, params, λ)
 
         for j in i+1:N
             #compute radius and distance vector between particles i and j
@@ -198,17 +195,19 @@ function dHpi_dq_and_dλ!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d,
     end
 
     rN = sqrt(sum(abs2, q[N]))
-    dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
+    if rN > 1e-12 || λ > 0.0
+        dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
+    end
     dHdλ += dλVdλ(rN, params,λ)
 
     return dHdλ
-    
+
 end
 
 
 """
-q-gradient, λ-gradient and U(q) of the softened particle insertion Hamiltonian, H = T(p) + U(q)
-Assumes q is given as Vector{SVector{d, R}} with length(q) = N
+q-gradient and λU(q)|λ,λ_next of the softened particle insertion Hamiltonian, H = T(p) + U(q) + λU(q)
+Assumes q is given as Vector{MVector{d, R}} with length(q) = N
 Periodic boundary conditions with the standard cutoff L/2 are imposed.
 Input functions V, dVdr must have signature r, LJ_params
 Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
@@ -219,9 +218,8 @@ function twoU_and_dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d
     N = length(q)
     @assert N == length(dHdq) "q and dHdq must have the same number of particles"
     N = length(q)
-    T = typeof(sqrt(sum(abs2,q[1])))
 
-    T = eltypeof(dHdq[1])
+    T = eltype(dHdq[1])
     dq = MVector{d, T}(undef)
     @inbounds for i in 1:N
         dHdq[i] .= zero(T)
@@ -233,8 +231,9 @@ function twoU_and_dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d
         #compute derivative of interaction potential with the inserted particle, fixed at the origin
         #and contribution of the λ-term to V
         ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
-        dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
-        dHdλ += dλVdλ(ri, params,λ)
+        if ri > 1e-12 || λ > 0.0
+            dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
+        end
         λU += λV(ri, params, λ)
         λnextU += λV(ri, params, λnext)
 
@@ -252,12 +251,67 @@ function twoU_and_dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d
     end
 
     rN = sqrt(sum(abs2, q[N]))
-    dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
-    dHdλ += dλVdλ(rN, params,λ)
+    if rN > 1e-12
+        dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
+    end
     λU += λV(rN, params, λ)
     λnextU += λV(rN, params, λ_next)
 
     return λU, λnextU
+    
+end
+
+
+"""
+q-gradient and λU(q)|all λ of the softened particle insertion Hamiltonian, H = T(p) + U(q) + λU(q)
+Assumes q is given as Vector{MVector{d, R}} with length(q) = N
+Periodic boundary conditions with the standard cutoff L/2 are imposed.
+Input functions V, dVdr must have signature r, LJ_params
+Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
+"""
+function allU_and_dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d, Float64}}, params::LJ_params, λ::Real, λ_schedule::Vector{Float64}, L::SVector{d, Float64},
+    V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function) where {d}
+
+    N = length(q)
+    @assert N == length(dHdq) "q and dHdq must have the same number of particles"
+    N = length(q)
+
+    T = eltype(dHdq[1])
+    dq = MVector{d, T}(undef)
+    @inbounds for i in 1:N
+        dHdq[i] .= zero(T)
+    end
+    λU = zeros(length(λ_schedule))
+
+    @inbounds for i in 1:N-1
+        #compute derivative of interaction potential with the inserted particle, fixed at the origin
+        #and contribution of the λ-term to V
+        ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        if ri > 1e-12 || λ > 0.0
+            dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
+        end
+        λU .+= λV.(ri, params, λ_schedule)
+
+        for j in i+1:N
+            #compute radius and distance vector between particles i and j
+            dq .= q[i] .- q[j]
+            dq .= dq .- L .* round.(dq./ L) #pbc + minimum image convention
+            r  = sqrt(sum(abs2, dq))
+
+            #compute gradient and contribution to V
+            Fij = dVdr(r, params)*dq/r
+            dHdq[i] .+= Fij
+            dHdq[j] .-= Fij
+        end
+    end
+
+    rN = sqrt(sum(abs2, q[N]))
+    if rN > 1e-12 || λ > 0.0
+        dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
+    end
+    λU .+= λV.(rN, params, λ_schedule)
+
+    return λU
     
 end
 
@@ -293,7 +347,9 @@ function Hpi(p::Vector{MVector{d,R}}, q::Vector{MVector{d,R}}, m::Real, params::
     @inbounds for i in 1:N-1
         #compute contribution of the λ-term to V and of the momentums
         ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
-        U += λV(ri, params, λ)
+        if ri > 1e-12
+            U += λV(ri, params, λ)
+        end
         K += sum(abs2, p[i])
 
         for j in i+1:N
@@ -307,7 +363,9 @@ function Hpi(p::Vector{MVector{d,R}}, q::Vector{MVector{d,R}}, m::Real, params::
     end
 
     rN = sqrt(sum(abs2, q[N]))
-    U += λV(rN, params, λ)
+    if rN > 1e-12
+        U += λV(rN, params, λ)
+    end
     K += sum(abs2, p[N])
     K /= 2*m
 
@@ -315,16 +373,46 @@ function Hpi(p::Vector{MVector{d,R}}, q::Vector{MVector{d,R}}, m::Real, params::
     
 end
 
+"""
+Particle instertion potential (U). Versatile formulation that can be integrated with ForwardDiff, but this is not efficient. 
+Inserted particle is fixed at the origin during the process
+Periodic boundary conditions with the standard cutoff L/2 are imposed.
+Input functions V, dVdr must have signature r, LJ_params
+Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
+"""
+function Upi(q::Vector{MVector{d,R}}, params::LJ_params, λ::Real, L::SVector{d,R},
+    V::Function, λV::Function) where {d,R}
 
+    N = length(q)
+    T = typeof(sqrt(sum(abs2,q[1])))
 
+    U = 0
+    dq = MVector{d, T}(undef)
 
+    @inbounds for i in 1:N-1
+        #compute contribution of the λ-term to V and of the momentums
+        ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        if ri > 1e-12
+            U += λV(ri, params, λ)
+        end
 
+        for j in i+1:N
+            #compute radius and distance vector between particles i and j
+            dq .= q[i] .- q[j]
+            dq .= dq .- L .* round.(dq./ L) #pbc + minimum image convention
+            r  = sqrt(sum(abs2, dq))
+            #compute contribution to U
+            U += V(r, params)
+        end
+    end
 
+    rN = sqrt(sum(abs2, q[N]))
+    if rN > 1e-12
+        U += λV(rN, params, λ)
+    end
 
-
-
-
-
+    return U   
+end
 
 
 
