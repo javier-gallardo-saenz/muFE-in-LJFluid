@@ -2,6 +2,7 @@ using StaticArrays
 using Random
 using ProgressBars
 using Roots
+using Statistics
 
 
 """
@@ -68,7 +69,7 @@ end
 """
 Perform thermodynamic integration (TI)
 """
-function thermodynamic_integration(N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
+function thermodynamic_integration(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
     γ::Real, kbT::Real, δt::Real, write_every::Int) where {d, R<:Real}
 
@@ -90,11 +91,7 @@ function thermodynamic_integration(N::Int, m::Real, params::LJ_params, λ_steps:
 
     #initial equilibration, longer to get rid of effects of unphysical starting state 
     println("Initial equilibration/relaxation")
-    BAOAB!(p, q, m, params, λ_schedule[1], L, dVdr, dλVdr, γ, kbT, δt, 15000, write_every)
-
-    #number of steps we can be sure will be enough to ensure equilibrium is reached
-    safe_no_steps_for_eq = 10000
-    safe_no_steps_for_prod = 15000
+    BAOAB!(p, q, m, params, λ_schedule[1], L, dVdr, dλVdr, γ, kbT, δt, initial_eq_steps, write_every)
 
     #vectors to store <∂H/∂λ>
     dHdλ_avgs = zeros(length(λ_schedule))
@@ -103,12 +100,12 @@ function thermodynamic_integration(N::Int, m::Real, params::LJ_params, λ_steps:
     for i in ProgressBar(eachindex(λ_schedule))
         #equilibrate
         println("Equilibrating")
-        BAOAB!(p, q, m, params, λ_schedule[i], L, dVdr, dλVdr, γ, kbT, δt, safe_no_steps_for_eq, write_every)
+        BAOAB!(p, q, m, params, λ_schedule[i], L, dVdr, dλVdr, γ, kbT, δt, eq_steps, write_every)
         #production run
         message = "Production run for λ=$(λ_schedule[i])"
         println(message)
         dHdλ_avgs[i] = BAOAB_ti!(p, q, m, params, λ_schedule[i], L, V, dVdr, λV, dλVdr, dλVdλ,
-         γ, kbT, δt, safe_no_steps_for_prod, write_every)
+         γ, kbT, δt, prod_steps, write_every)
         println(dHdλ_avgs[i])
     end
     println(dHdλ_avgs)
@@ -128,7 +125,7 @@ end
 """
 Collect data for FEP
 """
-function collect_fep(N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
+function collect_fep(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
     γ::Real, kbT::Real, δt::Real, write_every::Int) where {d, R<:Real}
     
@@ -151,19 +148,17 @@ function collect_fep(N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVect
 
     #initial equilibration, longer to get rid of effects of unphysical starting state 
     println("Initial equilibration/relaxation")
-    BAOAB!(p, q, m, params, λ_schedule[1], L, dVdr, dλVdr, γ, kbT, δt, 15000, write_every)
+    BAOAB!(p, q, m, params, λ_schedule[1], L, dVdr, dλVdr, γ, kbT, δt, initial_eq_steps, write_every)
 
-    #number of steps we can be sure will be enough to ensure equilibrium is reached
-    safe_no_steps_for_eq = 10000
-    safe_no_steps_for_prod = 15000
-
-
-    for i in 1:λ_steps
+    for i in ProgressBar(1:λ_steps)
         #equilibrate
-        BAOAB!(p, q, m, params, λ_schedule[i], L, dVdr, dλVdr, γ, kbT, δt, safe_no_steps_for_eq, write_every)
+        println("Equilibrating")
+        BAOAB!(p, q, m, params, λ_schedule[i], L, dVdr, dλVdr, γ, kbT, δt, eq_steps, write_every)
         #production run
-        BAOAB_twoλ!(data[i], p, q,  m, params, λ_schedule[i], λ_schedule[i+1], L, V, dVdr, λV, dλVdr, dλVdλ,
-         γ, kbT, δt, safe_no_steps_for_prod, write_every)
+        message = "Production run for λ=$(λ_schedule[i])"
+        println(message)
+        BAOAB_twoλ!(data[i], p, q, m, params, λ_schedule[i], λ_schedule[i+1], L, V, dVdr, λV, dλVdr, dλVdλ,
+         γ, kbT, δt, prod_steps)
     end
 
     return data
@@ -171,15 +166,42 @@ end
 
 
 """
+Auxiliary function for FEP computation
+"""
+function fep_aux(d::fep_data, kbT::Real)
+    aux = mean(exp.((d.λ1_U .- d.λ2_U)./kbT))
+    return -kbT*log(aux)
+end
+
+
+"""
+Compute the free energy difference using FEP
+"""
+function fep(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
+    V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
+    γ::Real, kbT::Real, δt::Real, write_every::Int) where {d, R<:Real}
+
+    #generate the necessary data for both FEP and BAR computation of the free energy
+    data = collect_fep(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, V, dVdr, λV, dλVdr, dλVdλ, 
+    γ, kbT, δt, write_every)
+
+    ΔF_fep = cumsum(fep_aux.(data, kbT))
+
+    return ΔF_fep
+end
+
+
+"""
 Collect data for MBAR (used for BAR as well)
 """
-function collect_mbar(N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
+function collect_mbar(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
     γ::Real, kbT::Real, δt::Real, write_every::Int) where {d, R<:Real}
     
-    data = [mu_data_MBAR(Vector{Vector{Float64}}()) for _ in 1:λ_steps]
+    data = [mu_data_MBAR(Vector{Vector{Float64}}()) for _ in 1:(λ_steps+1)]
     #define λ schedule
     λ_schedule = range(0, 1; length = λ_steps+1)
+    λ_vector = Vector{Float64}(λ_schedule)
 
     #sample initial momentums from the Boltzmann distribution
     p = [MVector{d, R}(randn(d) .* sqrt(m * kbT)) for _ in 1:N]
@@ -196,19 +218,17 @@ function collect_mbar(N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVec
 
     #initial equilibration, longer to get rid of effects of unphysical starting state 
     println("Initial equilibration/relaxation")
-    BAOAB!(p, q, m, params, λ_schedule[1], L, dVdr, dλVdr, γ, kbT, δt, 15000, write_every)
+    BAOAB!(p, q, m, params, λ_schedule[1], L, dVdr, dλVdr, γ, kbT, δt, initial_eq_steps, write_every)
 
-    #number of steps we can be sure will be enough to ensure equilibrium is reached
-    safe_no_steps_for_eq = 10000
-    safe_no_steps_for_prod = 15000
-
-
-    for i in 1:λ_steps
+    for i in ProgressBar(1:λ_steps+1)
         #equilibrate
-        BAOAB!(p, q, m, params, λ_schedule[i], L, dVdr, dλVdr, γ, kbT, δt, safe_no_steps_for_eq, write_every)
+        println("Equilibrating")
+        BAOAB!(p, q, m, params, λ_schedule[i], L, dVdr, dλVdr, γ, kbT, δt, eq_steps, write_every)
         #production run
-        BAOAB_allλ!(data[i], p, q,  m, params, λ_schedule[i], λ_schedule, L, V, dVdr, λV, dλVdr, dλVdλ,
-         γ, kbT, δt, safe_no_steps_for_prod, write_every)
+        message = "Production run for λ=$(λ_schedule[i])"
+        println(message)
+        BAOAB_allλ!(data[i], p, q,  m, params, λ_schedule[i], λ_vector, L, V, dVdr, λV, dλVdr, dλVdλ,
+         γ, kbT, δt, prod_steps)
     end
 
     return data
@@ -216,40 +236,43 @@ end
 
 
 """
-Auxiliary function for FEP computation
-"""
-function fep_aux(d::mu_data, kbT::Real)
-    aux = mean(exp.((d.λ1_U .- d.λ2_U)./kbT))
-    return -kbT*log(aux)
-end
-
-
-"""
 Auxiliary function for BAR computation
 """
-function BAR_aux(d::mu_data, kbT::Real)
-    aux = d.λ1_U .- d.λ2_U
+function BAR_aux(ΔλU_12::Vector{Float64}, ΔλU_21::Vector{Float64}, kbT::Real)
     #define function that needs to be zero
-    f(ΔF) = mean(1 ./(1 .+ exp.((aux .- ΔF)./kbT))) - mean(1 ./(1 .+ exp.((-aux .+ ΔF)./kbT)))
+    f(ΔF) = mean(1 ./(1 .+ exp.((ΔλU_12 .- ΔF)./kbT))) - mean(1 ./(1 .+ exp.(-(ΔλU_21 .+ ΔF)./kbT)))
     ΔF_bar = find_zero(f, 0.0) 
     return ΔF_bar
 end
 
 
 """
-Compute the free energy difference using FEP
+Auxiliary function for MBAR computation
 """
-function fep(N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
+function MBAR_aux(ΔλU_12::Vector{Float64})
+end
+
+
+"""
+Compute the free energy difference using BAR and MBAR
+"""
+function BAR(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
     γ::Real, kbT::Real, δt::Real, write_every::Int) where {d, R<:Real}
 
     #generate the necessary data for both FEP and BAR computation of the free energy
-    data = collect_fep_bar(N, m, params, λ_steps, L, V, dVdr, λV, dλVdr, dλVdλ, 
+    data = collect_mbar(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, V, dVdr, λV, dλVdr, dλVdλ, 
     γ, kbT, δt, write_every)
 
-    ΔF_fep = cumsum(fep_aux.(data))
+    local_ΔF = zeros(λ_steps)
 
-    return ΔF_fep
+    for i in 1:λ_steps
+            ΔλU_12 = data[i].λ_U[:, i+1] .- data[i].λ_U[:, i]
+            ΔλU_21 = data[i+1].λ_U[:,i] .- data[i+1].λ_U[:, i+1] 
+            local_ΔF[i] = BAR_aux(ΔλU_12, ΔλU_21, kbT)
+    end
+        
+    return cumsum(local_ΔF)       
 end
 
 

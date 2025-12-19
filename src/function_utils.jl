@@ -235,7 +235,7 @@ function twoU_and_dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d
             dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
         end
         λU += λV(ri, params, λ)
-        λnextU += λV(ri, params, λnext)
+        λnextU += λV(ri, params, λ_next)
 
         for j in i+1:N
             #compute radius and distance vector between particles i and j
@@ -290,7 +290,7 @@ function allU_and_dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d
         if ri > 1e-12 || λ > 0.0
             dHdq[i] .+= dλVdr(ri, params, λ)*q[i]/ri
         end
-        λU .+= λV.(ri, params, λ_schedule)
+        λU .+= λV.(ri, Ref(params), λ_schedule)
 
         for j in i+1:N
             #compute radius and distance vector between particles i and j
@@ -309,7 +309,7 @@ function allU_and_dHpi_dq!(dHdq::Vector{MVector{d,Float64}}, q::Vector{MVector{d
     if rN > 1e-12 || λ > 0.0
         dHdq[N] .+= dλVdr(rN, params, λ)*q[N]/rN
     end
-    λU .+= λV.(rN, params, λ_schedule)
+    λU .+= λV.(rN, Ref(params), λ_schedule)
 
     return λU
     

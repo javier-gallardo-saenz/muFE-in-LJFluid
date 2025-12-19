@@ -21,8 +21,8 @@ using Plots
 params = LJ_params(1.0,1.0)
 m = 1.0
 γ = 1.0
-T = 1.2
-ρ = 0.8
+T = 1.5
+ρ = 0.1
 δt = 0.001
 N = 256
 
@@ -31,8 +31,8 @@ L = @SVector[l, l, l]
 d = length(L)
 
 sample_every = 100
-n_trial_insertions = 1000
-n_tries_per_insertion = 200
+n_trial_insertions = 10000
+n_tries_per_insertion = 500
 
 write_every = 100000
 
@@ -44,14 +44,16 @@ println(maximum(dUs))
 
 println(ΔF)
 
+message_label = "ΔU Distribution at T*=$(T), ρ*=$(ρ)"
+
 # --- Plotting the histogram ---
 plot_hist = histogram(dUs, 
     # Use a specific number of bins for resolution (e.g., 50 to 100)
     bins = 100, 
     # Label the plot and axes
-    label = "ΔU Distribution at T*=1.2, ρ*=0.8",
+    label = "message_label",
     xlabel = "Insertion Energy (ΔU/kBT)", 
-    ylabel = "Count (Log Scale Recommended)",
+    ylabel = "Count",
     # Recommended: Use a log-scale on the y-axis to see the small, important tails
     yguide = "Frequency (log scale)",
     yscale = :log10, 
