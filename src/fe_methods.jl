@@ -187,6 +187,9 @@ function fep(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::R
 
     ΔF_fep = cumsum(fep_aux.(data, kbT))
 
+    println("<λU> for λ_schedule[λ_steps] is:")
+    println(mean(data[λ_steps].λ1_U))
+
     return ΔF_fep
 end
 
@@ -198,7 +201,7 @@ function collect_mbar(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
     γ::Real, kbT::Real, δt::Real, write_every::Int) where {d, R<:Real}
     
-    data = [mu_data_MBAR(Vector{Vector{Float64}}()) for _ in 1:(λ_steps+1)]
+    data = [mu_data_MBAR(zeros(prod_steps, λ_steps+1)) for _ in 1:(λ_steps+1)]
     #define λ schedule
     λ_schedule = range(0, 1; length = λ_steps+1)
     λ_vector = Vector{Float64}(λ_schedule)
@@ -240,21 +243,14 @@ Auxiliary function for BAR computation
 """
 function BAR_aux(ΔλU_12::Vector{Float64}, ΔλU_21::Vector{Float64}, kbT::Real)
     #define function that needs to be zero
-    f(ΔF) = mean(1 ./(1 .+ exp.((ΔλU_12 .- ΔF)./kbT))) - mean(1 ./(1 .+ exp.(-(ΔλU_21 .+ ΔF)./kbT)))
+    f(ΔF) = mean(1 ./(1 .+ exp.((ΔλU_12 .- ΔF)./kbT))) - mean(1 ./(1 .+ exp.((ΔλU_21 .+ ΔF)./kbT)))
     ΔF_bar = find_zero(f, 0.0) 
     return ΔF_bar
 end
 
 
 """
-Auxiliary function for MBAR computation
-"""
-function MBAR_aux(ΔλU_12::Vector{Float64})
-end
-
-
-"""
-Compute the free energy difference using BAR and MBAR
+Compute the free energy difference using BAR
 """
 function BAR(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
@@ -267,12 +263,161 @@ function BAR(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::R
     local_ΔF = zeros(λ_steps)
 
     for i in 1:λ_steps
-            ΔλU_12 = data[i].λ_U[:, i+1] .- data[i].λ_U[:, i]
-            ΔλU_21 = data[i+1].λ_U[:,i] .- data[i+1].λ_U[:, i+1] 
+            ΔλU_12 = data[i].λ_U[:,i+1] .- data[i].λ_U[:,i]
+            ΔλU_21 = data[i+1].λ_U[:,i] .- data[i+1].λ_U[:,i+1] 
             local_ΔF[i] = BAR_aux(ΔλU_12, ΔλU_21, kbT)
     end
         
     return cumsum(local_ΔF)       
+end
+
+
+"""
+Auxiliary function for computing the logarithm of the sum of the elements of a vector
+while ensuring stability (thanks to the substraction of the maximum element in the argument of the exponential)
+"""
+function log_sum_exp(x::Vector{Float64}, weights::Union{Nothing, Vector{Float64}}=nothing)
+    Mx = maximum(x)
+    if weights === nothing
+        return Mx + log(sum(exp.(x .- Mx)))
+    else 
+        if length(x) != length(weights)
+            throw(DimensionMismatch("The dimensions of x and weights must match, but currently x has length $(length(x)) and weights has length $(length(weights))"))
+        end
+        return Mx + log(sum(weights .* exp.(x .- Mx)))
+    end
+end
+
+
+"""
+Auxiliary function for computation of MBAR overlap matrix
+"""
+function mbar_overlap(u_sk::Matrix{Float64}, f_k::Vector{Float64}, S_k::Vector{Float64}, log_denom::Vector{Float64})
+    S_total, K = size(u_sk)
+    C = zeros(K,K)
+
+    for s in 1:S_total
+        w_s = exp.(f_k .- u_sk[s,:] .- log_denom[s])
+        for k in 1:K, l in 1:K
+            C[k,l] += S_k[k]*w_s[k]*w_s[l]
+        end
+    end
+
+    return C
+end
+    
+
+"""
+Auxiliary function for MBAR computation.
+u_sk is the matrix of reduced lambda-dependent energies (i.e., lambda dependent energies divided by kbT)
+u_sk must have shape (S_total, lambda_steps+1)
+In our case S_total is always prod_steps*(lambda_steps+1).
+S_k is the vector with the number of samples for each lambda value. 
+In our case, S_k = [prod_steps ... prod_steps].
+"""
+function MBAR_aux(u_sk::Matrix{Float64}, S_k::Vector{Float64}; max_iter=500, tol=1e-12, α=0.2)
+    S_total, K = size(u_sk)
+    if S_total != sum(S_k)
+        throw(DimensionMismatch("The sum of the elements in S_k must match the first dimension of u_sk"))
+    end
+
+    #f = F/kbT
+    f_k = zeros(K)
+    
+    # warm start with picard's method (fixed point iteration)
+    for iter in 1:50
+        f_old = copy(f_k)
+
+        #compute denominator in MBAR formula
+        log_denom = [log_sum_exp(f_k .- u_sk[s,:], S_k) for s in 1:S_total]
+
+        #update f_k in log_space (Picard's method)
+        for k in 1:K
+            f_k[k] = -log_sum_exp(-u_sk[:,k] .- log_denom)
+        end
+
+        #normalize to keep f_k[1] = 0
+        f_k .-= f_k[1]
+
+        #check convergence 
+        if maximum(abs.(f_k[2:end] .- f_old[2:end])) < tol
+            println("MBAR converged in $(iter) iterations")
+            return f_k
+        end
+    end
+
+    #Newton's method (inspired by pyMBAR)
+    # R = [f_k[k] + log_sum_exp(-u_sk[:,k] .- log_denom) for k in 1:K]
+    for iter in 1:max_iter
+        #compute denominator in MBAR formula
+        log_denom = [log_sum_exp(f_k .- u_sk[s,:], S_k) for s in 1:S_total]
+
+        #compute residuals 
+        R = [f_k[k] + log_sum_exp(-u_sk[:,k] .- log_denom) for k in 1:K]
+
+        #compute overlap matrix
+        C = mbar_overlap(u_sk, f_k, S_k, log_denom)
+
+        #compute Jacobian
+        J = I - C
+
+        #we need to remove one state as we only have relative free energies
+        #here we always remove lambda=0
+        δf = zeros(K)
+        δf[2:end] = -(J[2:end, 2:end]\ R[2:end])
+
+        f_k .+= α .* δf
+
+        #compute new denominator and residuals  
+        log_denom = [log_sum_exp(f_k .- u_sk[s,:], S_k) for s in 1:S_total]
+        R = [f_k[k] + log_sum_exp(-u_sk[:,k] .- log_denom) for k in 1:K]
+
+        #check convergence 
+        if maximum(abs.(R[2:end])) < tol
+            println("MBAR converged in $(50 + iter) iterations")
+            return f_k
+        end
+    end
+
+    throw(Error("MBAR did not converge"))
+end
+
+
+"""
+Compute the free energy difference using BAR and MBAR
+"""
+function MBAR(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::Real, params::LJ_params, λ_steps::Int, L::SVector{d,R}, 
+    V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
+    γ::Real, kbT::Real, δt::Real, write_every::Int) where {d, R<:Real}
+
+    #generate the necessary data for both FEP and BAR computation of the free energy
+    data = collect_mbar(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, V, dVdr, λV, dλVdr, dλVdλ, 
+    γ, kbT, δt, write_every)
+
+    local_ΔF_BAR = zeros(λ_steps)
+
+    for i in 1:λ_steps
+            ΔλU_12 = data[i].λ_U[:,i+1] .- data[i].λ_U[:,i]
+            ΔλU_21 = data[i+1].λ_U[:,i] .- data[i+1].λ_U[:,i+1] 
+            local_ΔF_BAR[i] = BAR_aux(ΔλU_12, ΔλU_21, kbT)
+    end
+    ΔF_BAR = cumsum(local_ΔF_BAR)
+
+    #flatten our data struct so that for every lambda we have all samples
+    #from all simulations (ran at different lambdas) in the same column
+    U_sk = vcat([d.λ_U for d in data]...)
+    u_sk = U_sk ./kbT
+
+    #the samples for every lambda are all the same in our case but
+    #we assemble them in a vector for mbar implementation convenience and convert them to floats
+    S_k = fill(prod_steps, λ_steps+1)
+    S_k = Float64.(S_k)
+
+    #obtain free energy differences between states using MBAR
+    f_k = MBAR_aux(u_sk, S_k)
+    ΔF_MBAR = kbT.*f_k
+
+    return ΔF_BAR, ΔF_MBAR
 end
 
 

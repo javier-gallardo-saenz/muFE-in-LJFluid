@@ -29,7 +29,7 @@ l = box_length(N, ρ)
 L = @SVector[l, l, l]
 d = length(L)
 
-λ_steps = 20
+λ_steps = 10
 write_every = 100000
 initial_eq_steps = 15000
 eq_steps = 10000

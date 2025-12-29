@@ -22,10 +22,10 @@ mutable struct fep_data
 end
 
 """
-Data storage for μ_ext analysis with MBAR
+Data storage for μ_ext analysis with BAR and MBAR
 """
 mutable struct mu_data_MBAR
-    λ_U::Vector{Vector{Float64}}
+    λ_U::Matrix{Float64}
 end
 
 

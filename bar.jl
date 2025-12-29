@@ -29,19 +29,24 @@ l = box_length(N, ρ)
 L = @SVector[l, l, l]
 d = length(L)
 
-λ_steps = 20
+λ_steps = 10
 write_every = 100000
 initial_eq_steps = 15000
 eq_steps = 10000
 prod_steps = 15000
 
-
-ΔF = BAR(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
+ΔF_BAR, ΔF_MBAR = MBAR(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
  γ, T, δt, write_every)
 
-ΔF = cat(0.0, ΔF; dims=1)
+ΔF_BAR = cat(0.0, ΔF_BAR; dims=1)
 
-plot(range(0, 1; length = λ_steps+1), ΔF, 
+println("Free energy as predicted by BAR is")
+println(ΔF_BAR)
+
+println("Free energy as predicted by MBAR is")
+println(ΔF_MBAR)
+
+p_BAR = plot(range(0, 1; length = λ_steps+1), ΔF_BAR, 
     label="Free energy difference",          # Label for the first line (legend entry)
     linewidth=3,                # Line thickness
     linestyle=:solid,            # Line style (e.g., :solid, :dot, :dash)
@@ -53,7 +58,25 @@ plot(range(0, 1; length = λ_steps+1), ΔF,
     #grid=true                   # Show the grid lines
 )
 
-println(ΔF)
-
 filename = "bar_$(ρ)_$(T)_$(λ_steps).png"
-savefig(filename)
+savefig(p_BAR, filename)
+
+
+p_MBAR = plot(range(0, 1; length = λ_steps+1), ΔF_MBAR, 
+    label="Free energy difference",          # Label for the first line (legend entry)
+    linewidth=3,                # Line thickness
+    linestyle=:solid,            # Line style (e.g., :solid, :dot, :dash)
+    color=:blue,                # Line color
+    title="Free energy difference as a function of λ", # Main plot title
+    xlabel="λ",   # X-axis label
+    ylabel="ΔF",             # Y-axis label
+    legend=:bottomleft,         # Position of the legend
+    #grid=true                   # Show the grid lines
+)
+
+filename = "mbar_$(ρ)_$(T)_$(λ_steps).png"
+savefig(p_MBAR, filename)
+
+
+
+
