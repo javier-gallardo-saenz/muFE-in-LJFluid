@@ -2,6 +2,59 @@ using StaticArrays
 using Random
 using ProgressBars
 
+"""
+1 step of the Langevin thermostat with BAOAB integrator
+For efficient multistep integration, see next function.
+"""
+function onestep_BAOAB!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, L::SVector{d,Float64},
+    dVdr::Function, dλVdr::Function, γ::Real, kbT::Real, δt::Real) where {d}
+
+    N = length(q)
+    T = typeof(sqrt(sum(abs2,q[1])))
+
+    dHdq = [@MVector zeros(T, d) for _ in 1:N] 
+    ξ = @MVector zeros(T,d)
+
+    #Langevin Parameters
+    c = exp(-γ*δt)
+    σ = sqrt(m*kbT*(1-c^2))
+
+    #step B: p -> p + 0.5*δt*F(q)
+    dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
+    @inbounds for i in 1:N
+        p[i] .-= 0.5*δt*dHdq[i]
+    end
+
+    #step A: q -> q + 0.5*δt*dH/dp (+pbcs)
+    @inbounds for i in 1:N
+        q[i] .+= 0.5*δt*p[i]/m
+        q[i] .-= L .* round.(q[i]./ L)
+    end
+
+    #step O: Langevin Thermostatting
+    @inbounds for i in 1:N
+        @inbounds for j in 1:d
+            ξ[j] = randn()
+        end
+        p[i] .= c.*p[i] .+ σ.*ξ
+    end
+
+    #step A: q -> q + 0.5*δt*dH/dp (+ pbcs)
+    @inbounds for i in 1:N
+        q[i] .+= 0.5*δt*p[i]/m 
+        q[i] .-= L .* round.(q[i]./ L)
+    end
+
+    #step B: p -> p + 0.5*δt*F(q)
+    dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
+    @inbounds for i in 1:N
+        p[i] .-= 0.5*δt*dHdq[i]
+    end
+
+    return nothing
+
+end
+
 
 """
 Langevin thermostat with BAOAB integrator.
@@ -84,7 +137,7 @@ function BAOAB_load_and_save!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d
             p[i] .-= 0.5*δt*dHdq[i]
         end
 
-        if steps%write_every == 0
+        if step%write_every == 0
             save_simulation_state(save_as, p, q, m, params, λ, L, function_names, γ, kbT, δt, step)
         end
 
@@ -99,35 +152,7 @@ Does not compute any averages or store values while it runs
 """
 function BAOAB!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, L::SVector{d,Float64},
     dVdr::Function, dλVdr::Function,
-    γ::Real, kbT::Real, δt::Real, steps::Int, write_every::Int, save_as::String = "BAOAB_sim",
-    load_file::Union{Nothing, String} = nothing, load_start::Bool = false) where {d}
-
-    if load_start
-        step₀, m₀, γ₀, kbT₀, λ₀, δt₀, L₀, params₀, functions₀, p₀, q₀, _ = load_simulation(load_file)
-
-        step = step₀
-        m = m₀
-        γ = γ₀
-        kbT = kbT₀
-        λ = λ₀
-        δt = δt₀
-        L = L₀
-        params = params₀
-        p .= p₀
-        q .= q₀
-        
-        dVdr = resolve_function(functions₀.dVdr)
-        dλVdr = resolve_function(funcions₀.dλVdr)
-
-        initial_step = step₀ + 1
-
-    else
-        initial_step = 1
-    end
-    
-    function_names = H_eval_fun_names("","","","","")
-    function_names.dVdr = string(nameof(dVdr))
-    function_names.dλVdr = string(nameof(dλVdr))  
+    γ::Real, kbT::Real, δt::Real, steps::Int) where {d}
 
     N = length(q)
     T = typeof(sqrt(sum(abs2,q[1])))
@@ -140,7 +165,7 @@ function BAOAB!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m:
     σ = sqrt(m*kbT*(1-c^2))
 
     println("Running BAOAB Langevin")
-    @inbounds for step in ProgressBar(initial_step:initial_step+steps-1)
+    @inbounds for step in ProgressBar(1:steps)
         #step B: p -> p + 0.5*δt*F(q)
         dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
         @inbounds for i in 1:N
@@ -173,10 +198,6 @@ function BAOAB!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m:
             p[i] .-= 0.5*δt*dHdq[i]
         end
 
-        if steps%write_every == 0
-            save_simulation_state(save_as, p, q, m, params, λ, L, function_names, γ, kbT, δt, step)
-        end
-
     end
 
     return nothing
@@ -190,80 +211,24 @@ Compatible with restart
 """
 function BAOAB_ti!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, L::SVector{d,Float64}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
-    γ::Real, kbT::Real, δt::Real, steps::Int, write_every::Int, save_as::String = "BAOAB_E_sim", 
-    load_file::Union{Nothing, String} = nothing) where {d}
+    γ::Real, kbT::Real, δt::Real, steps::Int, sample_every::Int) where {d}
 
     N = length(q)
     T = typeof(sqrt(sum(abs2,q[1])))
 
-    if load_file !== nothing
-        step₀, m₀, γ₀, kbT₀, λ₀, δt₀, L₀, params₀, functions₀, p₀, q₀, expectancy₀ = load_simulation(load_file)
-
-        m = m₀
-        γ = γ₀
-        kbT = kbT₀
-        λ = λ₀
-        δt = δt₀
-        L = L₀
-        params = params₀
-        p .= p₀
-        q .= q₀
-        
-        if functions₀.V !== ""
-            V = resolve_function(functions₀.V)
-        end
-
-        if functions₀.dVdr !== ""
-        dVdr = resolve_function(functions₀.dVdr)
-        end
-        
-        if functions₀.λV !== ""
-            λV = resolve_function(functions₀.λV)
-        end
-
-        if functions₀.dλVdr !== ""
-            dλVdr = resolve_function(funcions₀.dλVdr)
-        end
-
-        if functions₀.dλVdλ !== ""
-            dλVdλ = resolve_function(funcions₀.dλVdλ)
-        end
-
-        if expectancy₀ !== nothing
-            expectancy = step₀*expectancies₀
-        else
-            expectancy = 0
-        end
-
-        initial_step = step₀ + 1
-
-    else
-        initial_step = 1
-        #Let expectancy =  <∂H/∂λ>
-        expectancy = 0
-
-    end
-    
-    #store the names of the specific potential functions that are being used in this simulation
-    function_names = H_eval_fun_names("","","","","")
-    function_names.dVdr = string(nameof(dVdr))
-    function_names.dλVdr = string(nameof(dλVdr))  
-    function_names.V = string(nameof(V))
-    function_names.λV = string(nameof(λV))
-    function_names.dλVdλ = string(nameof(dλVdλ))
-
+    #Let expectancy =  <∂H/∂λ>
+    expectancy = 0
+    sample_count = 0
 
     dHdq = [@MVector zeros(T, d) for _ in 1:N] 
     ξ = @MVector zeros(T,d)
-
 
     #Langevin Parameters
     c = exp(-γ*δt)
     σ = sqrt(m*kbT*(1-c^2))
 
-
     print("Running BAOAB Langevin and estimating <∂H∂λ>")
-    @inbounds for step in ProgressBar(initial_step:initial_step+steps-1)
+    @inbounds for step in ProgressBar(1:steps)
         #step B: p -> p + 0.5*δt*F(q)
         dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
         @inbounds for i in 1:N
@@ -291,21 +256,24 @@ function BAOAB_ti!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}},
         end
 
         #step B: p -> p + 0.5*δt*F(q)
-        ∂H∂λ = dHpi_dq_and_dλ!(dHdq, q, params, λ, L, V, dVdr, λV, dλVdr, dλVdλ)
+        if step%sample_every == 0
+            ∂H∂λ = dHpi_dq_and_dλ!(dHdq, q, params, λ, L, V, dVdr, λV, dλVdr, dλVdλ)
+            #update expectancy
+            expectancy += ∂H∂λ
+            sample_count += 1
+        else
+            dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
+        end
         @inbounds for i in 1:N
             p[i] .-= 0.5*δt*dHdq[i]
         end
-
-        #update expectancy
-        expectancy += ∂H∂λ
-
-        if steps%write_every == 0
-            save_simulation_state(save_as, p, q, m, params, λ, L, function_names, γ, kbT, δt, step, expectancy/step)
-        end
-
     end
 
-    expectancy /= initial_step+steps
+    if sample_count > 0
+        expectancy /= sample_count
+    else
+        throw(ErrorException("The integrator did not run for enough steps to take the first sample"))
+    end
 
     return expectancy 
 end
@@ -319,7 +287,7 @@ Only half compatible with restart, collected data for FEP and BAR needs to be in
 """
 function BAOAB_twoλ!(data_mu::fep_data, p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, λ_next::Real, L::SVector{d,Float64}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
-    γ::Real, kbT::Real, δt::Real, steps::Int) where {d}
+    γ::Real, kbT::Real, δt::Real, steps::Int, sample_every::Int) where {d}
 
     N = length(q)
     T = typeof(sqrt(sum(abs2,q[1])))
@@ -362,9 +330,13 @@ function BAOAB_twoλ!(data_mu::fep_data, p::Vector{MVector{d,Float64}}, q::Vecto
         end
 
         #step B: p -> p + 0.5*δt*F(q)
-        λU, λUnext = twoU_and_dHpi_dq!(dHdq, q, params, λ, λ_next, L, V, dVdr, λV, dλVdr, dλVdλ)
-        push!(data_mu.λ1_U, λU)
-        push!(data_mu.λ2_U, λUnext)
+        if step % sample_every == 0
+            λU, λUnext = twoU_and_dHpi_dq!(dHdq, q, params, λ, λ_next, L, V, dVdr, λV, dλVdr, dλVdλ)
+            push!(data_mu.λ1_U, λU)
+            push!(data_mu.λ2_U, λUnext)
+        else 
+            dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
+        end
 
         @inbounds for i in 1:N
             p[i] .-= 0.5*δt*dHdq[i]
@@ -383,12 +355,17 @@ Only half compatible with restart, collected data for FEP and BAR needs to be in
 """
 function BAOAB_allλ!(data_mu::mu_data_MBAR, p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, λ_schedule::Vector{Float64}, L::SVector{d,Float64}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
-    γ::Real, kbT::Real, δt::Real, steps::Int) where {d}
+    γ::Real, kbT::Real, δt::Real, steps::Int, sample_every::Int) where {d}
+
+    S, _ = size(data_mu)
+    exp_S = div(steps, sample_every)
+    if S != expS
+        throw(DimensionMismatch("The provided struct for MBAR data storage first dimension ($(S)) must match the number of samples that the integrator will collect ($(exp_S))"))
+    end
+    current_sample = 1
 
     N = length(q)
     T = typeof(sqrt(sum(abs2,q[1])))
-
-    initial_step = 1
 
     #initiate vectors for updates 
     dHdq = [@MVector zeros(T, d) for _ in 1:N] 
@@ -398,7 +375,7 @@ function BAOAB_allλ!(data_mu::mu_data_MBAR, p::Vector{MVector{d,Float64}}, q::V
     c = exp(-γ*δt)
     σ = sqrt(m*kbT*(1-c^2))
 
-    @inbounds for step in ProgressBar(initial_step:initial_step+steps-1)
+    @inbounds for step in ProgressBar(1:steps)
         #step B: p -> p + 0.5*δt*F(q)
         dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
         @inbounds for i in 1:N
@@ -426,8 +403,13 @@ function BAOAB_allλ!(data_mu::mu_data_MBAR, p::Vector{MVector{d,Float64}}, q::V
         end
 
         #step B: p -> p + 0.5*δt*F(q)
-        allλU = allU_and_dHpi_dq!(dHdq, q, params, λ, λ_schedule, L, V, dVdr, λV, dλVdr, dλVdλ)
-        data_mu.λ_U[step, :] = allλU
+        if step % sample_every == 0
+            allλU = allU_and_dHpi_dq!(dHdq, q, params, λ, λ_schedule, L, V, dVdr, λV, dλVdr, dλVdλ)
+            data_mu.λ_U[current_sample, :] = allλU
+            current_sample += 1
+        else
+            dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
+        end
 
         @inbounds for i in 1:N
             p[i] .-= 0.5*δt*dHdq[i]
@@ -447,8 +429,6 @@ function BAOAB_rdf!(hist::Vector{Float64}, dr::Float64, p::Vector{MVector{d,Floa
     dVdr::Function, dλVdr::Function,
     γ::Real, kbT::Real, δt::Real, steps::Int, sample_every::Int) where {d}
 
-    initial_step = 1
-
     N = length(q)
     T = typeof(sqrt(sum(abs2,q[1])))
 
@@ -461,7 +441,7 @@ function BAOAB_rdf!(hist::Vector{Float64}, dr::Float64, p::Vector{MVector{d,Floa
     σ = sqrt(m*kbT*(1-c^2))
 
     println("Running BAOAB Langevin")
-    @inbounds for step in ProgressBar(initial_step:initial_step+steps-1)
+    @inbounds for step in ProgressBar(1:steps)
         #step B: p -> p + 0.5*δt*F(q)
         dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
         @inbounds for i in 1:N
@@ -494,7 +474,7 @@ function BAOAB_rdf!(hist::Vector{Float64}, dr::Float64, p::Vector{MVector{d,Floa
             p[i] .-= 0.5*δt*dHdq[i]
         end
 
-        if steps%sample_every == 0
+        if step%sample_every == 0
             @inbounds for i in 1:N-1
                 for j in i+1:N
                     dq .= q[i] .- q[j]

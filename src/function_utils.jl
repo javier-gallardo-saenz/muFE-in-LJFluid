@@ -104,6 +104,26 @@ end
 
 
 """
+Tail correction for μ_ext for a Lennard Jones system
+"""
+function tailcorr_μex_LJ(ρ::Real, rc::Real, params::LJ_params)
+    #tail contribution is (2π*ρ)*int_{rc}^{∞}{4ϵ*((σ/r)^12 - (σ/r)^6)*r^2}
+    int_r12 = (params.σ)^(12)*rc^(-9)/9.0
+    int_r6 = (params.σ)^(6)*rc^(-3)/3.0
+    return 8π*ρ*params.ϵ*(int_r12 - int_r6)
+end
+
+
+"""
+Tail correction for average potential energy in a Lennard Jones system
+We assume g(r) = 1 ∀r > rc
+"""
+function tailcorr_U_LJ(ρ::Real, N::Real, rc::Real, params::LJ_params)
+    return N*tailcorr_μex_LJ(ρ, rc, params)/2.0
+end
+
+
+"""
 q-gradient of the particle insertion Hamiltonian.
 Assumes q is given as Vector{SVector{d, R}} with length(q) = N
 Periodic boundary conditions with the standard cutoff L/2 are imposed.
@@ -413,6 +433,28 @@ function Upi(q::Vector{MVector{d,R}}, params::LJ_params, λ::Real, L::SVector{d,
 
     return U   
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

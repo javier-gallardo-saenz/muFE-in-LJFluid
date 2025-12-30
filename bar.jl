@@ -20,23 +20,26 @@ using Plots
 params = LJ_params(1.0,1.0)
 m = 1.0
 γ = 1.0
-T = 1.5
-ρ = 0.1
+T = 1.0
+ρ = 0.8
 δt = 0.001
 N = 256
 
 l = box_length(N, ρ)
 L = @SVector[l, l, l]
 d = length(L)
+rc = l/2.0
+println("Running simulation in a cubic box of reduced length $(l), at reduced temperature $(T) and reduced density $(ρ)")
+println("The BAOAB integrators will have a timestep in reduced units of $(δt) and use the friction coefficient $(γ)")
 
-λ_steps = 10
+λ_steps = 20
 write_every = 100000
-initial_eq_steps = 15000
-eq_steps = 10000
-prod_steps = 15000
+initial_eq_steps = 50000
+eq_steps = 15000
+prod_steps = 20000
 
 ΔF_BAR, ΔF_MBAR = MBAR(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
- γ, T, δt, write_every)
+ γ, T, δt)
 
 ΔF_BAR = cat(0.0, ΔF_BAR; dims=1)
 
@@ -45,6 +48,10 @@ println(ΔF_BAR)
 
 println("Free energy as predicted by MBAR is")
 println(ΔF_MBAR)
+
+tail_correction_muext = tailcorr_μex_LJ(ρ, rc, params)
+println("The tail correction is")
+println(tail_correction_muext)
 
 p_BAR = plot(range(0, 1; length = λ_steps+1), ΔF_BAR, 
     label="Free energy difference",          # Label for the first line (legend entry)

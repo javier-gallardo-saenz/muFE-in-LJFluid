@@ -11,16 +11,20 @@ using Plots
 params = LJ_params(1.0,1.0)
 m = 1.0
 γ = 1.0
-T = 1.5
-steps = 20000
-δt = 0.001
-N = 256
-ρ = 0.1
+T = 1.0
+eval_steps = 20000
+eq_steps = 50000
+n_samples = 250
+δt = 0.005
+N = 500
+ρ = 0.8
 l = box_length(N, ρ)
+rc = l/2.0
 L = @SVector[l, l, l]
 d = length(L)
-write_every = 200
 
+println("Running simulation in a cubic box of reduced length $(l), at reduced temperature $(T) and reduced density $(ρ)")
+println("The BAOAB integrators will have a timestep in reduced units of $(δt) and use the friction coefficient $(γ)")
 
 #########################################################
 #       Check we truly are in an NVT ensemble
@@ -39,21 +43,31 @@ for i in 1:N
     q[i] = MVector{d,Float64}(Float64.(coords[i]))
 end
 
-temps = zeros(steps+1)
-Us = zeros(steps+1)
-
 #equilibrate
-BAOAB!(p, q, m, params, 0.0, L, LJ_pot_der, dλsoft_pot_dr, γ, T, δt, 20000, write_every)
+BAOAB!(p, q, m, params, 0.0, L, LJ_pot_der, dλsoft_pot_dr, γ, T, δt, eq_steps)
 
-@inbounds for i in ProgressBar(1:steps)
+#Compute correlation time for U
+Us = zeros(eval_steps)
+@inbounds for i in ProgressBar(1:eval_steps)
+    onestep_BAOAB!(p, q, m, params, 0.0, L, LJ_pot_der, dλsoft_pot_dr, γ, T, δt)
+    Us[i] = Upi(q, params, 0.0, L, LJ_pot, λsoft_pot)
+end
+τ = autocorr_time(Us, 2000)
+println("The autocorrelation time of the potential energy in this steup is approximately $(τ)")
+sample_every = ceil(Int, τ)
+println("Sampling every $(sample_every) steps")
+
+
+#compute U, T 
+temps = zeros(n_samples)
+Us = zeros(n_samples)
+@inbounds for i in ProgressBar(1:n_samples)
+    BAOAB!(p, q, m, params, 0.0, L, LJ_pot_der, dλsoft_pot_dr, γ, T, δt, sample_every)
     temps[i] = sum(sum(abs2, pi) for pi in p) / (d*N*m)
     Us[i] = Upi(q, params, 0.0, L, LJ_pot, λsoft_pot)
-    BAOAB!(p, q, m, params, 0.0, L, LJ_pot_der, dλsoft_pot_dr, γ, T, δt, 1, write_every)
 end
-temps[steps+1] = sum(sum(abs2, pi) for pi in p) / (d*N*m)
-Us[steps+1] = Upi(q, params, 0.0, L, LJ_pot, λsoft_pot)
 
-plot(range(0, steps*δt, length=steps+1), temps, 
+plot(range(1, n_samples), temps, 
     label="Kinetic Temperature",          # Label for the first line (legend entry)
     linewidth=3,                # Line thickness
     linestyle=:solid,            # Line style (e.g., :solid, :dot, :dash)
@@ -65,10 +79,10 @@ plot(range(0, steps*δt, length=steps+1), temps,
     #grid=true                   # Show the grid lines
 )
 
-savefig("Temperature_Conservation_Check.png")
+savefig("Temperature_Conservation_Check_$(ρ)_$(T).png")
 
 
-plot(range(0, steps*δt, length=steps+1), Us, 
+plot(range(1, n_samples), Us, 
     label="Internal Energy",          # Label for the first line (legend entry)
     linewidth=3,                # Line thickness
     linestyle=:solid,            # Line style (e.g., :solid, :dot, :dash)
@@ -80,6 +94,8 @@ plot(range(0, steps*δt, length=steps+1), Us,
     #grid=true                   # Show the grid lines
 )
 
-savefig("U_check.png")
+savefig("U_check_$(ρ)_$(T).png")
 
+U_correction = tailcorr_U_LJ(ρ, N, rc, params)
 println(mean(Us))
+println(mean(Us) + U_correction)
