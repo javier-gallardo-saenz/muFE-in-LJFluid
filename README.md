@@ -34,7 +34,7 @@ with Λ = h / √(2 π m k_B T) the thermal wavelength.
 ## ⚙️ Simulation and Estimation Methods
 
 - **Ensemble:** Canonical (**NVT**) with Langevin thermostat  
-- **Integrator:** BAOAB Langevin
+- **Integrator:** BAOAB
 - **Potential:** Lennard-Jones with optional (but necessary for particle insertion simulations to work) soft-core modification  
 - **Free-energy estimators:**
   - Thermodynamic Integration (TI)
@@ -62,6 +62,67 @@ with Λ = h / √(2 π m k_B T) the thermal wavelength.
 ├── [method]_data/ # Pre-generated MD data (provided, method in [TI, FEP, MBAR], where we use MBAR's data for BAR)
 
 
+### `muFE_LJ` module
+
+All core functionality is implemented in the Julia module **`muFE_LJ`**, located in `src/`.  
+The module exports all user-facing routines required for free-energy estimation.
+
+All top-level scripts import this module and are intended to be run directly.
+
 ---
 
+
+## ▶️ How to Run
+
+### 1️⃣ Requirements
+
+- Julia **≥ 1.9** (recommended)
+
+If you want to use a local project environment:
+
+```bash
+julia
+] activate .
+] instantiate
+```
+
+### 2️⃣ Running a free-energy estimator
+
+Each script is self-contained and intended to be user-editable.
+Typically, the user only needs to modify:
+
+thermodynamic parameters (temperature, density, number of particles)
+
+paths to the provided MD data
+
+estimator-specific parameters (λ grid, block sizes, etc.)
+
+#### Thermodynamic Integration
+julia ti.jl
+
+#### Free Energy Perturbation
+julia fep.jl
+
+#### BAR / MBAR
+julia bar_mbar.jl
+Additionally, if one wants to run only BAR it is enough to modify the name of the function in line 42 to BAR
+
+#### Widom insertion
+julia widom.jl
+
+---
+
+## 📊 Analysis and Validation
+
+rdf.jl computes radial distribution functions for structural validation
+
+perf_checks.jl computes the temperature evolution and internal energy of the system
+
+---
+
+## 📌 Notes
+
+Pre-generated molecular dynamics trajectories are provided, allowing direct execution of the free-energy estimators without rerunning MD.
+
+The scripts are designed to be readable and easily modifiable for testing alternative parameters or methods.
 
