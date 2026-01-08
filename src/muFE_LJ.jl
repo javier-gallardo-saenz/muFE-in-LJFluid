@@ -10,7 +10,7 @@ module muFE_LJ
     export LJ_params, kB, box_length, T_real, rho_real, mu_real, reduced_time_unit, t_real, autocorr_time
 
     include("function_utils.jl")
-    export LJ_pot, LJ_pot_der, λLJ, dλLJ_dr, dλLJ_dλ, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ, tailcorr_μex_LJ, tailcorr_U_LJ,
+    export ideal_mu_term, LJ_pot, LJ_pot_der, λLJ, dλLJ_dr, dλLJ_dλ, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ, tailcorr_μex_LJ, tailcorr_U_LJ,
     Hpi, Upi, dHpi_dq!, dHpi_dq_and_dλ!, twoU_and_dHpi_dq!, allU_and_dHpi_dq!, dHpi_dp!
 
     include("auxiliars.jl")

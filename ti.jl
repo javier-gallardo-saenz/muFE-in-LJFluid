@@ -11,19 +11,13 @@ using JLD2
 #                  CALCULATE μ_ext THROUGH TI SIMULATIONS
 ###################################################################################
 
-#T = [] #values of T in reduced units
-#ρ = [] #values of ρ in reduced units
-
-#PLAN: try temperatures 1.5, 1.35, 1.2
-#PLAN: try densities 0.1, 0.45, 0.8 
-
 #this script uses reduced units
 
 params = LJ_params(1.0,1.0)
 m = 1.0
 γ = 1.0
 T = 1.0
-ρ = 0.8
+ρ = 0.9
 δt = 0.002
 N = 256
 
@@ -34,7 +28,7 @@ rc = l/2.0
 println("Running simulation in a cubic box of reduced length $(l), at reduced temperature $(T) and reduced density $(ρ)")
 println("The BAOAB integrators will have a timestep in reduced units of $(δt) and use the friction coefficient $(γ)")
 
-λ_steps = 50
+λ_steps = 100
 initial_eq_steps = 50000
 eq_steps = 15000
 prod_steps = 20000
@@ -46,7 +40,7 @@ prod_steps = 20000
 
 @load "TI_data/data_$(ρ)_$(T)_$(λ_steps).jld2" data_ti
 
-ΔF, σ_ΔF, τs = thermodynamic_integration(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, 
+ΔF, σ_ΔF, τs = thermodynamic_integration(initial_eq_steps, eq_steps, prod_steps, N+1, m, params, λ_steps, L, 
  LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ, 
  γ, T, δt, data_ti)
 

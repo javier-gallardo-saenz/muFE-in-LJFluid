@@ -39,7 +39,7 @@ prod_steps = 20000
 
 @load "FEP_data/data_$(ρ)_$(T)_$(λ_steps).jld2" data_fep
 
-ΔF, σ_ΔF, τs = fep(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
+ΔF, σ_ΔF, τs = fep(initial_eq_steps, eq_steps, prod_steps, N+1, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
  γ, T, δt, data_fep)
 
 plot(range(0, 1; length = λ_steps+1), ΔF, 
@@ -58,7 +58,7 @@ plot!(range(0, 1; length = λ_steps+1), ΔF .+ σ_ΔF, fillrange=ΔF .- σ_ΔF, 
 
 println("The free energy difference as predicted by FEP is")
 println(ΔF)
-println("The std predicted by block averaging is")
+println("The std predicted by bootstrapping is")
 println(σ_ΔF)
 println("The autocorrelation times were")
 println(τs)

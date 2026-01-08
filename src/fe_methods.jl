@@ -29,15 +29,16 @@ function widom_method(sample_every::Int, n_trial_insertions::Int, n_tries_per_in
     end
 
     #initial equilibration, longer to get rid of effects of unphysical starting state 
+    #IMPORTANT: we run with $\lambda = 1.0 because this yields standard LJ system with N particles 
     println("Initial equilibration/relaxation")
-    BAOAB!(p, q, m, params, 0.0, L, dVdr, dλVdr, γ, kbT, δt, 15000)
+    BAOAB!(p, q, m, params, 1.0, L, dVdr, dλVdr, γ, kbT, δt, 50000)
 
     avg_exp_minusbetadU = 0.0
     dq = MVector{d, R}(undef)
     dUs = zeros(n_trial_insertions*n_tries_per_insertion)
 
     for i in ProgressBar(1:n_trial_insertions)
-        BAOAB!(p, q, m, params, 0.0, L, dVdr, dλVdr, γ, kbT, δt, sample_every)
+        BAOAB!(p, q, m, params, 1.0, L, dVdr, dλVdr, γ, kbT, δt, sample_every)
         
         for k in 1:n_tries_per_insertion
             dU = 0
@@ -61,7 +62,6 @@ function widom_method(sample_every::Int, n_trial_insertions::Int, n_tries_per_in
         end
     end
     avg_exp_minusbetadU /= n_tries_per_insertion*n_trial_insertions
-    println(avg_exp_minusbetadU)
     return -kbT*log(avg_exp_minusbetadU), dUs
 end
 
@@ -141,12 +141,14 @@ function thermodynamic_integration(initial_eq_steps::Int, eq_steps::Int, prod_st
     #uncertainty computation using error propagation for linear combination
     μ_ext = zeros(λ_steps+1)
     σ_μ_ext = zeros(λ_steps+1)
+    δλ = λ_schedule[2] - λ_schedule[1]
+    σ_aux_squared = (0.5*δλ)^(2)*dHdλ_std[1]^(2)
     for i in 2:(λ_steps + 1)
         δλ = λ_schedule[i] - λ_schedule[i-1]
         μ_ext[i] = μ_ext[i-1] + 0.5*δλ*(mean(data[i].w) + mean(data[i-1].w))
-        σ_μ_ext[i] = σ_μ_ext[i-1] + (0.5*δλ)^(2)*(dHdλ_std[i]^2 + dHdλ_std[i-1]^2)
+        σ_μ_ext[i] = sqrt(σ_aux_squared + (0.5*δλ)^(2)*(dHdλ_std[i]^2))
+        σ_aux_squared += δλ^(2)*dHdλ_std[i]^(2)
     end
-    σ_μ_ext = sqrt.(σ_μ_ext)
 
     #recover autocorrelation times for each lambda
     τs = [data[i].τ for i in eachindex(data)]
@@ -224,13 +226,13 @@ function fep(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::R
     #define FEP function for bootstrapping
     f(w::Vector{Float64}) = -kbT*log(mean(w))
     
-    #bootstrapping
+    #block-averaging
     ΔF = zeros(λ_steps+1)
     ΔF_σ = zeros(λ_steps+1)
     for i in 1:λ_steps
         _, σ = bootstrap(block_averaged_samples(data[i].w, 2*ceil(Int, data[i].τ)), f, 1000)
         ΔF[i+1] = ΔF[i] - kbT*log(mean(data[i].w))
-        ΔF_σ[i+1] = sqrt(ΔF_σ[i+1]^2 + σ^2)
+        ΔF_σ[i+1] = sqrt(ΔF_σ[i]^2 + σ^2)
     end
 
     #recover autocorrelation times for each lambda
@@ -335,16 +337,25 @@ end
 Auxiliary function for BAR theoretical, asymptotic σ computation. Assumes independent samples.
 """
 function BAR_σ(ΔF::Float64, ΔλU_12::Vector{Float64}, ΔλU_21::Vector{Float64}, kbT::Real)
-    #define function that needs to be zero
     N1 = length(ΔλU_12)
     N2 = length(ΔλU_21)
-    aux = kbT*log(N1/N2)
-    w1 = 1 ./(1 .+ exp.((ΔλU_12 .- ΔF .+ aux)./kbT))
-    τ_w1 = autocorr_time(w1, 2000)
-    w2 = 1 ./(1 .+ exp.((ΔλU_21 .+ ΔF .- aux)./kbT))
-    τ_w2 = autocorr_time(w2, 2000)
-    var = 1 / (sum(w1 .* (1 .- w1))/(2*τ_w1) + sum(w2 .* (1 .- w2))/(2*τ_w2))
-    return sqrt(var)
+    M = log(N2/N1)
+
+    # Contribution from samples in state 1
+    X1 = (ΔλU_12 ./ kbT) .- (ΔF ./ kbT) .+ M
+    fprime1 = 1.0 ./ (2 .+ 2*cosh.(X1))
+
+    # Contribution from samples in state 2
+    X2 = (ΔλU_21 ./ kbT) .+ (ΔF ./ kbT) .- M
+    fprime2 = 1.0 ./ (2 .+ 2*cosh.(X2))
+
+    # Asymptotic variance
+    var = 1.0 / (sum(fprime1) + sum(fprime2)) - (N1 + N2) / (N1 * N2)
+
+    # Clip negative variance to zero
+    var = max(var, 0.0)
+
+    return kbT * sqrt(var)
 end
 
 
@@ -564,20 +575,35 @@ function MBAR(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::
         end
     end
 
+    #compute indices for subsampled data 
     S_k_subsampled = [div(prod_steps, ceil(Int, 2*data[i].τ)) for i in eachindex(data)]
     indices = [range(1, step=ceil(Int, 2*data[i].τ), length=S_k_subsampled[i]) for i in eachindex(data)]
 
     #BAR
     ΔF_BAR = zeros(λ_steps+1)
     σ_ΔF_BAR = zeros(λ_steps+1)
+    σboot_ΔF_BAR = zeros(λ_steps+1)
+
+    #compute data blocks for bootstrapping
+    #data_blocks = Vector{Vector{Matrix{Float64}}}(undef, λ_steps+1)
+    #for i in eachindex(data)
+    #    data_blocks[i] = blocks_for_mbar(data[i].λ_U, 2*ceil(Int, data[i].τ))
+    #end
 
     println("Running BAR at each lambda interval")
     for i in ProgressBar(1:λ_steps)
+        #BAR computation
         ΔλU_12 = data[i].λ_U[:,i+1] .- data[i].λ_U[:,i]
         ΔλU_21 = data[i+1].λ_U[:,i] .- data[i+1].λ_U[:,i+1]
 
         local_ΔF = BAR_aux(ΔλU_12, ΔλU_21, kbT)
         ΔF_BAR[i+1] = ΔF_BAR[i] + local_ΔF
+
+        #bootstrapping
+        #idx = i
+        #f(λU_resampled::Vector{Matrix{Float64}}) = BAR_aux_bootstrap(λU_resampled, idx, kbT)
+        #_, σ = block_bootstrap_bar(data_blocks, f, 100)
+        #σboot_ΔF_BAR[i+1] = sqrt(σboot_ΔF_BAR[i]^2 + σ^2)
 
         #compute asymptotic std with subsampled data
         ΔλU_12_subsampled = data[i].λ_U[indices[i],i+1] .- data[i].λ_U[indices[i],i]
@@ -595,20 +621,20 @@ function MBAR(initial_eq_steps::Int, eq_steps::Int, prod_steps::Int, N::Int, m::
     S_k = fill(prod_steps, λ_steps+1)
     S_k = Float64.(S_k)
 
-    f_k = MBAR_aux(u_sk, S_k, max_iter=10000)
+    f_k = MBAR_aux(u_sk, S_k, max_iter=500)
     ΔF_MBAR = kbT .* f_k
 
     #compute theoretical, asymptotic standard deviation using covariance matrix on susbsampled data (insufficient memory otherwise)
-    u_sk = vcat([data[i].λ_U[indices[i],:] ./ kbT for i in eachindex(data)]...)
-    log_denom = [log_sum_exp(f_k .- u_sk[s,:], S_k_subsampled) for s in 1:S_total]
-    Θ =  mbar_cov(u_sk, f_k, S_k_subsampled, log_denom)
+    #u_sk = vcat([data[i].λ_U[indices[i],:] ./ kbT for i in eachindex(data)]...)
+    #log_denom = [log_sum_exp(f_k .- u_sk[s,:], S_k_subsampled) for s in 1:S_total]
+    #Θ =  mbar_cov(u_sk, f_k, S_k_subsampled, log_denom)
     #because we set f_0 = 0
-    σ_ΔF_MBAR = kbT .* sqrt.(diag(Θ))
+    #σ_ΔF_MBAR = kbT .* sqrt.(diag(Θ))
 
     #recover autocorrelation times for each lambda
-    τs = [data[i].τ for i in eachindex(λ_schedule)]
+    τs = [data[i].τ for i in eachindex(data)]
 
-    return ΔF_BAR, σ_ΔF_BAR, ΔF_MBAR, σ_ΔF_MBAR, τs
+    return ΔF_BAR, σ_ΔF_BAR, σboot_ΔF_BAR, ΔF_MBAR, τs
 end
 
 

@@ -21,27 +21,26 @@ using Plots
 params = LJ_params(1.0,1.0)
 m = 1.0
 γ = 1.0
-T = 1.5
-ρ = 0.1
-δt = 0.001
+T = 1.0
+ρ = 0.9
+δt = 0.002
 N = 256
 
 l = box_length(N, ρ)
 L = @SVector[l, l, l]
 d = length(L)
 
-sample_every = 100
-n_trial_insertions = 10000
+sample_every = 1000
+n_trial_insertions = 1000
 n_tries_per_insertion = 500
 
-write_every = 100000
-
+println("Running simulation in a cubic box of reduced length $(l), at reduced temperature $(T) and reduced density $(ρ)")
+println("The BAOAB integrators will have a timestep in reduced units of $(δt) and use the friction coefficient $(γ)")
 
 ΔF, dUs = widom_method(sample_every, n_trial_insertions, n_tries_per_insertion, N, m, params, L, LJ_pot, LJ_pot_der, dλLJ_dr,
-γ, T, δt, write_every)
+γ, T, δt)
 
-println(maximum(dUs))
-
+println("The free energy difference predicted by Widom's method is")
 println(ΔF)
 
 message_label = "ΔU Distribution at T*=$(T), ρ*=$(ρ)"
@@ -60,5 +59,5 @@ plot_hist = histogram(dUs,
     title = "Widom Insertion Energy Analysis"
 )
 
-savefig(plot_hist, "dU_hist.png")
+savefig(plot_hist, "Widom_plots/dU_hist_$(T).png")
 

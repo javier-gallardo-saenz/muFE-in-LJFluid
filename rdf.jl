@@ -41,14 +41,21 @@ for i in 1:N
     q[i] = MVector{d,Float64}(Float64.(coords[i]))
 end
 
+#equilibrate at λ = 1, which corresponds to having N standard LJ particles
+BAOAB!(p, q, m, params, 1.0, L, LJ_pot_der , dλsoft_pot_dr, γ, T, δt, 50000)
+
+##########################################################################
+# UNCOMMENT FOR COMPUTATION OF RDF AT a λ ≠ 1
+
 #equilibrate at λ = 0
-BAOAB!(p, q, m, params, 0.0, L, LJ_pot_der , dλsoft_pot_dr, γ, T, δt, 50000)
+#BAOAB!(p, q, m, params, 0.0, L, LJ_pot_der , dλsoft_pot_dr, γ, T, δt, 50000)
 
 #bring system to desired λ
-λ_schedule = range(0, λ; length = λ_steps+1)
-for i in ProgressBar(eachindex(λ_schedule))
-    BAOAB!(p, q, m, params, λ_schedule[i], L, LJ_pot_der , dλsoft_pot_dr, γ, T, δt, 10000)
-end
+#λ_schedule = range(0, λ; length = λ_steps+1)
+#for i in ProgressBar(eachindex(λ_schedule))
+#    BAOAB!(p, q, m, params, λ_schedule[i], L, LJ_pot_der , dλsoft_pot_dr, γ, T, δt, 10000)
+#end
+###########################################################################
 
 #define bins
 n_bins = 100
