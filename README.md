@@ -47,19 +47,20 @@ with Λ = h / √(2 π m k_B T) the thermal wavelength.
 
 ## 📁 Project Structure
 
+```markdown
 .
 ├── src/
-│ └── muFE_LJ.jl # Main Julia module
-| └── [muFE_LJ_implementation].jl # muFE_LJ funtions implementation
-│
-├── ti.jl # Thermodynamic Integration
-├── fep.jl # Free Energy Perturbation
-├── bar_mbar.jl # BAR and MBAR estimators
-├── widom.jl # Widom insertion (reference)
-├── rdf.jl # Radial distribution function
-├── perf_checks.jl # Performance benchmarks
-│
-├── [method]_data/ # Pre-generated MD data (provided, method in [TI, FEP, MBAR], where we use MBAR's data for BAR)
+│   └── muFE_LJ.jl
+│   └── [muFE_LJ_implementation].jl
+├── ti.jl
+├── fep.jl
+├── bar_mbar.jl
+├── widom.jl
+├── rdf.jl
+├── perf_checks.jl
+├── [method]_data/
+├── [method]_plots/
+```
 
 
 ### `muFE_LJ` module
