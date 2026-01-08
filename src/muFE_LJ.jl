@@ -19,6 +19,6 @@ module muFE_LJ
     export onestep_BAOAB!, BAOAB_load_and_save!, BAOAB!, BAOAB_ti!, BAOAB_twoλ!, BAOAB_allλ!, BAOAB_rdf!
 
     include("fe_methods.jl")
-    export widom_method, thermodynamic_integration, collect_fep_bar, collect_mbar, fep, BAR, MBAR
+    export widom_method, collect_ti, thermodynamic_integration, collect_fep, collect_mbar, fep, BAR, MBAR
 
 end

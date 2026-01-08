@@ -95,5 +95,5 @@ plot(rs, g,
 vline!([rc], label="cutoff radius", linewidth=2, linestyle=:dash, color=:red)
 hline!([1], label="expected asymptote", linewidth=1, linestyle=:dash, color=:gray)
 
-savefig("rdf_$(ρ)_$(T)_$(λ).png")
+savefig("rdf_plots/rdf_$(ρ)_$(T)_$(λ).png")
 

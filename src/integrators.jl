@@ -209,16 +209,12 @@ Langevin thermostat with BAOAB integrator.
 Computes the expectation value of ∂H/∂λ on the go
 Compatible with restart
 """
-function BAOAB_ti!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, L::SVector{d,Float64}, 
+function BAOAB_ti!(data_mu::mu_data, p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, L::SVector{d,Float64}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
     γ::Real, kbT::Real, δt::Real, steps::Int, sample_every::Int) where {d}
 
     N = length(q)
     T = typeof(sqrt(sum(abs2,q[1])))
-
-    #Let expectancy =  <∂H/∂λ>
-    expectancy = 0
-    sample_count = 0
 
     dHdq = [@MVector zeros(T, d) for _ in 1:N] 
     ξ = @MVector zeros(T,d)
@@ -227,7 +223,6 @@ function BAOAB_ti!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}},
     c = exp(-γ*δt)
     σ = sqrt(m*kbT*(1-c^2))
 
-    print("Running BAOAB Langevin and estimating <∂H∂λ>")
     @inbounds for step in ProgressBar(1:steps)
         #step B: p -> p + 0.5*δt*F(q)
         dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
@@ -258,9 +253,7 @@ function BAOAB_ti!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}},
         #step B: p -> p + 0.5*δt*F(q)
         if step%sample_every == 0
             ∂H∂λ = dHpi_dq_and_dλ!(dHdq, q, params, λ, L, V, dVdr, λV, dλVdr, dλVdλ)
-            #update expectancy
-            expectancy += ∂H∂λ
-            sample_count += 1
+            push!(data_mu.w, ∂H∂λ)
         else
             dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
         end
@@ -269,13 +262,7 @@ function BAOAB_ti!(p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}},
         end
     end
 
-    if sample_count > 0
-        expectancy /= sample_count
-    else
-        throw(ErrorException("The integrator did not run for enough steps to take the first sample"))
-    end
-
-    return expectancy 
+    return nothing
 end
 
 
@@ -285,9 +272,14 @@ Langevin thermostat with BAOAB integrator.
 Collects data for FEP and BAR
 Only half compatible with restart, collected data for FEP and BAR needs to be independently processsed
 """
-function BAOAB_twoλ!(data_mu::fep_data, p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, λ_next::Real, L::SVector{d,Float64}, 
+function BAOAB_twoλ!(ΔU::Vector{Float64},
+    p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, λ_next::Real, L::SVector{d,Float64}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
     γ::Real, kbT::Real, δt::Real, steps::Int, sample_every::Int) where {d}
+
+    if length(ΔU) != div(steps,sample_every)
+        throw(DimensionMismatch("The length of the auxiliary vector ($(length(ΔU))) should match the number of samples that will be taken ($(div(steps,sample_every)))"))
+    end
 
     N = length(q)
     T = typeof(sqrt(sum(abs2,q[1])))
@@ -331,9 +323,9 @@ function BAOAB_twoλ!(data_mu::fep_data, p::Vector{MVector{d,Float64}}, q::Vecto
 
         #step B: p -> p + 0.5*δt*F(q)
         if step % sample_every == 0
-            λU, λUnext = twoU_and_dHpi_dq!(dHdq, q, params, λ, λ_next, L, V, dVdr, λV, dλVdr, dλVdλ)
-            push!(data_mu.λ1_U, λU)
-            push!(data_mu.λ2_U, λUnext)
+            index = div(step, sample_every)
+            U1, U2 = twoU_and_dHpi_dq!(dHdq, q, params, λ, λ_next, L, V, dVdr, λV, dλVdr, dλVdλ)
+            ΔU[index] = U2 - U1
         else 
             dHpi_dq!(dHdq, q, params, λ, L, dVdr, dλVdr)
         end
@@ -353,13 +345,14 @@ Langevin thermostat with BAOAB integrator.
 Collects data for MBAR
 Only half compatible with restart, collected data for FEP and BAR needs to be independently processsed
 """
-function BAOAB_allλ!(data_mu::mu_data_MBAR, p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, λ_schedule::Vector{Float64}, L::SVector{d,Float64}, 
+function BAOAB_allλ!(data_mu::mu_data_MBAR,
+    p::Vector{MVector{d,Float64}}, q::Vector{MVector{d,Float64}}, m::Real, params::LJ_params, λ::Real, λ_schedule::Vector{Float64}, L::SVector{d,Float64}, 
     V::Function, dVdr::Function, λV::Function, dλVdr::Function, dλVdλ::Function,
     γ::Real, kbT::Real, δt::Real, steps::Int, sample_every::Int) where {d}
 
-    S, _ = size(data_mu)
+    S, _ = size(data_mu.λ_U)
     exp_S = div(steps, sample_every)
-    if S != expS
+    if S != exp_S
         throw(DimensionMismatch("The provided struct for MBAR data storage first dimension ($(S)) must match the number of samples that the integrator will collect ($(exp_S))"))
     end
     current_sample = 1

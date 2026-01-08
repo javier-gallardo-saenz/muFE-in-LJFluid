@@ -34,9 +34,9 @@ with Λ = h / √(2 π m k_B T) the thermal wavelength.
 ## ⚙️ Simulation Method
 
 - **Ensemble:** canonical (**NVT**) using a thermostat.
-- **Integrator:** velocity-Verlet (or BAOAB Langevin splitting).
+- **Integrator:** BAOAB Langevin.
 - **Potential:** standard Lennard-Jones or soft-core modification.
-- **Available estimators:** Thermodynamic Integration (TI), Free Energy Perturbation (FEP), Bennett’s Acceptance Ratio (BAR), or WHAM/MBAR for post-processing.
+- **Available estimators:** Thermodynamic Integration (TI), Free Energy Perturbation (FEP), Bennett’s Acceptance Ratio (BAR), or MBAR.
 
 ---
 

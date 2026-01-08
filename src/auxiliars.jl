@@ -132,4 +132,3 @@ Get function with given name from function_utils.jl
 function resolve_function(name::String)
     return getfield(function_utils, Symbol(name))
 end
-

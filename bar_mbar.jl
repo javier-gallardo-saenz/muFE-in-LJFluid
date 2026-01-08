@@ -4,6 +4,7 @@ using .muFE_LJ
 
 using StaticArrays
 using Plots
+using JLD2
 
 ###################################################################################
 #                  CALCULATE μ_ext THROUGH BAR 
@@ -22,7 +23,7 @@ m = 1.0
 γ = 1.0
 T = 1.0
 ρ = 0.8
-δt = 0.001
+δt = 0.002
 N = 256
 
 l = box_length(N, ρ)
@@ -32,22 +33,31 @@ rc = l/2.0
 println("Running simulation in a cubic box of reduced length $(l), at reduced temperature $(T) and reduced density $(ρ)")
 println("The BAOAB integrators will have a timestep in reduced units of $(δt) and use the friction coefficient $(γ)")
 
-λ_steps = 20
-write_every = 100000
+λ_steps = 50
 initial_eq_steps = 50000
 eq_steps = 15000
 prod_steps = 20000
 
-ΔF_BAR, ΔF_MBAR = MBAR(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
- γ, T, δt)
+#comment this if data has already been collected
 
-ΔF_BAR = cat(0.0, ΔF_BAR; dims=1)
+#data_mbar = collect_mbar(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
+# γ, T, δt)
+#@save "MBAR_data/data_$(ρ)_$(T)_$(λ_steps).jld2" data_mbar
 
-println("Free energy as predicted by BAR is")
+@load "MBAR_data/data_$(ρ)_$(T)_$(λ_steps).jld2" data_mbar
+
+ΔF_BAR, σexp_ΔF_BAR, σ_ΔF_BAR, ΔF_MBAR, σ_ΔF_MBAR, σ_ΔF_MBAR, τs = MBAR(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
+γ, T, δt, data_mbar)
+
+println("The free energy difference as predicted by BAR is")
 println(ΔF_BAR)
+println("The theoretical, asymptotic std is")
+println(σ_ΔF_BAR)
 
-println("Free energy as predicted by MBAR is")
+println("The free energy difference as predicted by BAR is")
 println(ΔF_MBAR)
+println("The theoretical, asymptotic std is")
+println(σ_ΔF_MBAR)
 
 tail_correction_muext = tailcorr_μex_LJ(ρ, rc, params)
 println("The tail correction is")
@@ -65,7 +75,10 @@ p_BAR = plot(range(0, 1; length = λ_steps+1), ΔF_BAR,
     #grid=true                   # Show the grid lines
 )
 
-filename = "bar_$(ρ)_$(T)_$(λ_steps).png"
+plot!(range(0, 1; length = λ_steps+1), ΔF_BAR .+ σ_ΔF_BAR, fillrange=ΔF_BAR .- σ_ΔF_BAR, linewidth=0, fillalpha=0.3, label="±1σ (asymptotic)")
+
+
+filename = "BAR_plots/bar_$(ρ)_$(T)_$(λ_steps).png"
 savefig(p_BAR, filename)
 
 
@@ -81,8 +94,13 @@ p_MBAR = plot(range(0, 1; length = λ_steps+1), ΔF_MBAR,
     #grid=true                   # Show the grid lines
 )
 
-filename = "mbar_$(ρ)_$(T)_$(λ_steps).png"
+plot!(range(0, 1; length = λ_steps+1), ΔF_BAR .+ σ_ΔF_MBAR, fillrange=ΔF_BAR .- σ_ΔF_MBAR, linewidth=0, fillalpha=0.3, label="±1σ (asymptotic)")
+
+filename = "MBAR_plots/mbar_$(ρ)_$(T)_$(λ_steps).png"
 savefig(p_MBAR, filename)
+
+println("The autocorrelation times of λU were")
+println(τs)
 
 
 

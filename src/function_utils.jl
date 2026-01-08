@@ -394,7 +394,7 @@ function Hpi(p::Vector{MVector{d,R}}, q::Vector{MVector{d,R}}, m::Real, params::
 end
 
 """
-Particle instertion potential (U). Versatile formulation that can be integrated with ForwardDiff, but this is not efficient. 
+Particle instertion potential (U).
 Inserted particle is fixed at the origin during the process
 Periodic boundary conditions with the standard cutoff L/2 are imposed.
 Input functions V, dVdr must have signature r, LJ_params
@@ -435,10 +435,55 @@ function Upi(q::Vector{MVector{d,R}}, params::LJ_params, λ::Real, L::SVector{d,
 end
 
 
+"""
+λ-dependent part of the particle instertion potential (U). 
+Inserted particle is fixed at the origin during the process
+Periodic boundary conditions with the standard cutoff L/2 are imposed.
+Input functions V, dVdr must have signature r, LJ_params
+Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
+"""
+function λUpi(q::Vector{MVector{d,R}}, params::LJ_params, λ::Real, L::SVector{d,R},
+    V::Function, λV::Function) where {d,R}
+
+    N = length(q)
+    T = typeof(sqrt(sum(abs2,q[1])))
+
+    U = 0
+    dq = MVector{d, T}(undef)
+
+    @inbounds for i in 1:N
+        #compute contribution of the λ-term to V and of the momentums
+        ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        if ri > 1e-12
+            U += λV(ri, params, λ)
+        end
+    end
+
+    return U   
+end
 
 
+"""
+λ-gradient of the softened particle insertion Hamiltonian, H = T(p) + U(q)
+Assumes q is given as Vector{MVector{d, R}} with length(q) = N
+Periodic boundary conditions with the standard cutoff L/2 are imposed.
+Input functions V, dVdr must have signature r, LJ_params
+Input functions λV, dλVdr and dλVdλ must have signature r, LJ_params, λ
+"""
+function dHpi_dλ(q::Vector{MVector{d, Float64}}, params::LJ_params, λ::Real, dλVdλ::Function) where {d}
 
+    N = length(q)
+    dHdλ = 0
 
+    @inbounds for i in 1:N
+        #compute derivative of interaction potential with the inserted particle, fixed at the origin
+        #and contribution of the λ-term to V
+        ri = sqrt(sum(abs2, q[i])) #no need to worry about minimum image convention here
+        dHdλ += dλVdλ(ri, params, λ)
+    end
+
+    return dHdλ
+end
 
 
 
