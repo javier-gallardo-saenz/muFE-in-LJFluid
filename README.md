@@ -31,12 +31,36 @@ with Λ = h / √(2 π m k_B T) the thermal wavelength.
 
 ---
 
-## ⚙️ Simulation Method
+## ⚙️ Simulation and Estimation Methods
 
-- **Ensemble:** canonical (**NVT**) using a thermostat.
-- **Integrator:** BAOAB Langevin.
-- **Potential:** standard Lennard-Jones or soft-core modification.
-- **Available estimators:** Thermodynamic Integration (TI), Free Energy Perturbation (FEP), Bennett’s Acceptance Ratio (BAR), or MBAR.
+- **Ensemble:** Canonical (**NVT**) with Langevin thermostat  
+- **Integrator:** BAOAB Langevin
+- **Potential:** Lennard-Jones with optional (but necessary for particle insertion simulations to work) soft-core modification  
+- **Free-energy estimators:**
+  - Thermodynamic Integration (TI)
+  - Free Energy Perturbation (FEP)
+  - Bennett Acceptance Ratio (BAR)
+  - Multistate Bennett Acceptance Ratio (MBAR)
+
+---
+
+
+## 📁 Project Structure
+
+.
+├── src/
+│ └── muFE_LJ.jl # Main Julia module
+| └── [muFE_LJ_implementation].jl # muFE_LJ funtions implementation
+│
+├── ti.jl # Thermodynamic Integration
+├── fep.jl # Free Energy Perturbation
+├── bar_mbar.jl # BAR and MBAR estimators
+├── widom.jl # Widom insertion (reference)
+├── rdf.jl # Radial distribution function
+├── perf_checks.jl # Performance benchmarks
+│
+├── [method]_data/ # Pre-generated MD data (provided, method in [TI, FEP, MBAR], where we use MBAR's data for BAR)
+
 
 ---
 
