@@ -10,30 +10,25 @@ using Plots
 #                  CALCULATE μ_ext THROUGH WIDOM METHOD
 ###################################################################################
 
-#T = [] #values of T in reduced units
-#ρ = [] #values of ρ in reduced units
-
-#PLAN: try temperatures 0.6, 0.9, 1.2
-#PLAN: try densities 0.1, 0.5, 
-
 #this script uses reduced units
 
-params = LJ_params(1.0,1.0)
-m = 1.0
-γ = 1.0
-T = 1.0
-ρ = 0.9
-δt = 0.002
-N = 256
+################################################
+#           EDIT PARAMETERS                    #
+params = LJ_params(1.0,1.0)                    #
+m = 1.0                                        #
+γ = 1.0                                        #             
+T = 1.0                                        #
+ρ = 0.9                                        #
+δt = 0.002                                     #
+N = 256                                        #                                              
+sample_every = 1000                            #
+n_trial_insertions = 1000                      #
+n_tries_per_insertion = 500                    #
+################################################
 
 l = box_length(N, ρ)
 L = @SVector[l, l, l]
 d = length(L)
-
-sample_every = 1000
-n_trial_insertions = 1000
-n_tries_per_insertion = 500
-
 println("Running simulation in a cubic box of reduced length $(l), at reduced temperature $(T) and reduced density $(ρ)")
 println("The BAOAB integrators will have a timestep in reduced units of $(δt) and use the friction coefficient $(γ)")
 

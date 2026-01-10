@@ -7,18 +7,25 @@ using Plots
 using JLD2
 
 ###################################################################################
-#                  CALCULATE μ_ext THROUGH BAR 
+#                  CALCULATE μ_ext THROUGH BAR and MBAR
 ###################################################################################
 
 #this script uses reduced units
 
-params = LJ_params(1.0,1.0)
-m = 1.0
-γ = 1.0
-T = 1.0
-ρ = 0.9
-δt = 0.002
-N = 256
+################################################
+#           EDIT PARAMETERS                    #
+params = LJ_params(1.0,1.0)                    #
+m = 1.0                                        #
+γ = 1.0                                        #             
+T = 1.0                                        #
+ρ = 0.9                                        #
+δt = 0.002                                     #
+N = 256                                        #    
+λ_steps = 100                                  #
+initial_eq_steps = 50000                       #
+eq_steps = 15000                               #
+prod_steps = 20000                             #                                          
+################################################
 
 l = box_length(N, ρ)
 L = @SVector[l, l, l]
@@ -26,11 +33,6 @@ d = length(L)
 rc = l/2.0
 println("Running simulation in a cubic box of reduced length $(l), at reduced temperature $(T) and reduced density $(ρ)")
 println("The BAOAB integrators will have a timestep in reduced units of $(δt) and use the friction coefficient $(γ)")
-
-λ_steps = 100
-initial_eq_steps = 50000
-eq_steps = 15000
-prod_steps = 20000
 
 #comment this if data has already been collected
 #data_mbar = collect_mbar(initial_eq_steps, eq_steps, prod_steps, N, m, params, λ_steps, L, LJ_pot, LJ_pot_der, λsoft_pot, dλsoft_pot_dr, dλsoft_pot_dλ,
