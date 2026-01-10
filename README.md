@@ -75,11 +75,18 @@ All top-level scripts import this module and are intended to be run directly.
 
 ## ▶️ How to Run
 
-### 1️⃣ Requirements
+### 1️⃣ Requirements and installation
 
 - Julia **≥ 1.9** (recommended)
 
-If you want to use a local project environment:
+1. Clone the repository
+
+```bash
+git clone https://github.com/yourname/muFE_LJ.git
+cd muFE_LJ
+```
+
+2. Activate project environment and install all dependencies:
 
 ```bash
 julia

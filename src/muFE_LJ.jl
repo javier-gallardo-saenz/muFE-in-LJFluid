@@ -5,6 +5,7 @@ module muFE_LJ
     using LinearAlgebra
     using Distances
     using ProgressBars
+    using Parameters
 
     include("utils.jl")
     export LJ_params, kB, box_length, T_real, rho_real, mu_real, reduced_time_unit, t_real, autocorr_time
