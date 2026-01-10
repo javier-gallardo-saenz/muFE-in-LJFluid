@@ -11,6 +11,7 @@ function ideal_mu_term(kBT::Float64, m::Float64, L::SVector{d,Float64}, N::Int64
     return -kbt * log((V / Λ^d) / (N + 1))
 end
 
+
 """
 Lennard-Jones potential evaluation
 """
